@@ -289,7 +289,21 @@ class Ship():
                 self.sound_explod.play()
                 self.init_debris()
             else:
-                # TODO draw explosion
+                # draw explosion
+                ship_cx = self.xpos + SHIP_SPRITE_SIZE/2;
+                ship_cy = self.ypos + SHIP_SPRITE_SIZE/2;
+
+                c = max(0, 200 - self.explod_tick)
+
+                for p in range(0, int((240 - self.explod_tick)/4)):           
+                    r = (32-(self.explod_tick*2)) * math.sqrt(random.uniform(0, 1))
+                    theta = random.uniform(0, 1) * 2 * math.pi;
+                    x = r * math.cos(theta);
+                    y = r * math.sin(theta);
+
+                    gfxdraw.pixel(env.map_buffer, int(ship_cx + x) , int(ship_cy + y), (c, c, c))
+
+                # debris
                 for deb in self.debris:
 
                     # move debris
