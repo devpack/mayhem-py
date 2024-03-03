@@ -15,7 +15,9 @@ Usage example:
 
 python3 mayhem.py
 
-python3 mayhem.py --server=ws://127.0.0.1:9000 --player_name=tony --ship_control=k1
+python3 mayhem.py --server=ws://127.0.0.1:9000 --player_name=tony --ship_control=k1 -sap
+
+python3 mayhem.py --server=ws://127.0.0.1:9000 --player_name=tony --ship_control=k1 -zoom
 python3 mayhem.py --server=ws://192.168.1.75:9000 --player_name=alex --ship_control=j1 -sap
 
 """
@@ -53,7 +55,7 @@ SHIP_MASS = 1.0
 SHIP_THRUST_MAX = 0.3 / SLOW_DOWN_COEF
 SHIP_ANGLESTEP = 5
 SHIP_ANGLE_LAND = 30
-SHIP_MAX_LIVES = 100
+SHIP_MAX_LIVES = 25
 SHIP_SPRITE_SIZE = 32
 
 iG       = 0.08 / SLOW_DOWN_COEF
@@ -172,28 +174,34 @@ class Shot():
 
 class Ship():
 
-    def __init__(self, screen_width, screen_height, ship_number, xpos, ypos, ship_pic, ship_pic_thrust, ship_pic_shield, joystick_number, lives):
+    def __init__(self, screen_width, screen_height, show_all_players, ship_number, xpos, ypos, ship_pic, ship_pic_thrust, ship_pic_shield, joystick_number, lives):
 
-        self.player_name = ""
-
-        self.view_width  = int((screen_width * W_PERCENT) / 2)
-        self.view_height = int((screen_height * H_PERCENT) / 2)
-
-        if ship_number == "1":
+        # renders only one player, in big
+        if not show_all_players:
+            self.view_width  = screen_width
+            self.view_height = screen_height
             self.view_left = MARGIN_SIZE
             self.view_top = MARGIN_SIZE
+        # renders all the players, split the screen in 4
+        else:
+            self.view_width  = int((screen_width * W_PERCENT) / 2)
+            self.view_height = int((screen_height * H_PERCENT) / 2)
 
-        elif ship_number == "2":
-            self.view_left = MARGIN_SIZE + self.view_width + MARGIN_SIZE
-            self.view_top = MARGIN_SIZE
+            if ship_number == "1":
+                self.view_left = MARGIN_SIZE
+                self.view_top = MARGIN_SIZE
 
-        elif ship_number == "3":
-            self.view_left = MARGIN_SIZE
-            self.view_top = MARGIN_SIZE + self.view_height + MARGIN_SIZE
+            elif ship_number == "2":
+                self.view_left = MARGIN_SIZE + self.view_width + MARGIN_SIZE
+                self.view_top = MARGIN_SIZE
 
-        elif ship_number == "4":
-            self.view_left = MARGIN_SIZE + self.view_width + MARGIN_SIZE
-            self.view_top = MARGIN_SIZE + self.view_height + MARGIN_SIZE
+            elif ship_number == "3":
+                self.view_left = MARGIN_SIZE
+                self.view_top = MARGIN_SIZE + self.view_height + MARGIN_SIZE
+
+            elif ship_number == "4":
+                self.view_left = MARGIN_SIZE + self.view_width + MARGIN_SIZE
+                self.view_top = MARGIN_SIZE + self.view_height + MARGIN_SIZE
 
         self.init_xpos = xpos
         self.init_ypos = ypos
@@ -220,7 +228,9 @@ class Ship():
         self.bounce = False
         self.shots = []
         self.lives = lives
-        
+        self.game_over = False
+        self.last_landed_pos = (self.init_xpos, self.init_ypos)
+
         self.explod = False
         self.explod_tick = 0
         self.debris = []
@@ -253,8 +263,12 @@ class Ship():
         self.joystick_number = joystick_number
 
     def reset(self):
-        self.xpos = self.init_xpos
-        self.ypos = self.init_ypos
+
+        if 0:
+            self.xpos = self.init_xpos
+            self.ypos = self.init_ypos
+        else:
+            self.xpos, self.ypos = self.last_landed_pos
 
         self.xposprecise = self.xpos
         self.yposprecise = self.ypos
@@ -279,6 +293,8 @@ class Ship():
         self.debris = []
 
         self.lives -= 1
+        if self.lives == 0:
+            self.game_over = True
 
     def init_debris(self):
 
@@ -372,7 +388,7 @@ class Ship():
     
     def update(self, env, left_pressed, right_pressed, thrust_pressed, shoot_pressed, shield_pressed):
 
-        if self.explod:
+        if self.explod or self.game_over:
             return
         
         # normal play
@@ -623,9 +639,11 @@ class Ship():
 
                 if ( (-1.0/SLOW_DOWN_COEF <= self.vx) and (self.vx < 1.0/SLOW_DOWN_COEF) and (-1.0/SLOW_DOWN_COEF < self.vy) and (self.vy < 1.0/SLOW_DOWN_COEF) ):
                     self.landed = True
+                    self.last_landed_pos = (self.xpos, self.ypos)
                     self.bounce = False
                 else:
                     self.bounce = True
+                    self.last_landed_pos = (self.xpos, self.ypos)
                     self.sound_bounce.play()
 
                 # no need to check other platforms
@@ -653,7 +671,7 @@ class Ship():
 
     def draw(self, map_buffer):
 
-        if self.explod:
+        if self.explod or self.game_over:
             return
         
         #game_window.blit(self.image_rotated, (self.view_width/2 + self.view_left + self.rot_xoffset, self.view_height/2 + self.view_top + self.rot_yoffset))
@@ -661,7 +679,7 @@ class Ship():
 
     def collide_map(self, map_buffer, map_buffer_mask, platforms):
 
-        if self.explod:
+        if self.explod or self.game_over:
             return
         
         # ship size mask
@@ -692,7 +710,7 @@ class Ship():
 
     def collide_ship(self, ships):
         
-        if self.explod:
+        if self.explod or self.game_over:
             return
 
         for ship in ships:
@@ -742,6 +760,7 @@ class MayhemEnv():
                  game_client_factory=None):
 
         self.myfont = pygame.font.SysFont('Arial', 20)
+        self.myfont_big = pygame.font.SysFont('Arial', 48, bold=True)
 
         self.player_name = player_name
         self.ship_control = ship_control
@@ -896,17 +915,42 @@ class MayhemEnv():
             SHIP4_X = (self.platforms[3][0] + self.platforms[3][1])/2 - 16
             SHIP4_Y = self.platforms[3][2] -29
 
-            self.ship_1 = Ship(self.game.screen_width, self.game.screen_height, "1", SHIP1_X, SHIP1_Y,
-                                    SHIP_1_PIC, SHIP_1_PIC_THRUST, SHIP_1_PIC_SHIELD, SHIP_1_JOY, SHIP_MAX_LIVES)
+            # lives
+            lives = SHIP_MAX_LIVES
+            try:
+                if self.ship_1:
+                    lives = self.ship_1.lives
+            except:
+                pass  
+            self.ship_1 = Ship(self.game.screen_width, self.game.screen_height, self.show_all_players, "1", SHIP1_X, SHIP1_Y,
+                                    SHIP_1_PIC, SHIP_1_PIC_THRUST, SHIP_1_PIC_SHIELD, SHIP_1_JOY, lives)
 
-            self.ship_2 = Ship(self.game.screen_width, self.game.screen_height, "2", SHIP2_X, SHIP2_Y,
-                                SHIP_2_PIC, SHIP_2_PIC_THRUST, SHIP_2_PIC_SHIELD, SHIP_2_JOY, SHIP_MAX_LIVES)
+            lives = SHIP_MAX_LIVES
+            try:
+                if self.ship_2:
+                    lives = self.ship_2.lives
+            except:
+                pass
+            self.ship_2 = Ship(self.game.screen_width, self.game.screen_height, self.show_all_players, "2", SHIP2_X, SHIP2_Y,
+                                SHIP_2_PIC, SHIP_2_PIC_THRUST, SHIP_2_PIC_SHIELD, SHIP_2_JOY, lives)
 
-            self.ship_3 = Ship(self.game.screen_width, self.game.screen_height, "3", SHIP3_X, SHIP3_Y,
-                                SHIP_3_PIC, SHIP_3_PIC_THRUST, SHIP_3_PIC_SHIELD, SHIP_3_JOY, SHIP_MAX_LIVES)
-
-            self.ship_4 = Ship(self.game.screen_width, self.game.screen_height, "4", SHIP4_X, SHIP4_Y,
-                                SHIP_4_PIC, SHIP_4_PIC_THRUST, SHIP_4_PIC_SHIELD, SHIP_4_JOY, SHIP_MAX_LIVES)
+            lives = SHIP_MAX_LIVES
+            try:
+                if self.ship_3:
+                    lives = self.ship_3.lives
+            except:
+                pass
+            self.ship_3 = Ship(self.game.screen_width, self.game.screen_height, self.show_all_players, "3", SHIP3_X, SHIP3_Y,
+                                SHIP_3_PIC, SHIP_3_PIC_THRUST, SHIP_3_PIC_SHIELD, SHIP_3_JOY, lives)
+            
+            lives = SHIP_MAX_LIVES
+            try:
+                if self.ship_4:
+                    lives = self.ship_4.lives
+            except:
+                pass
+            self.ship_4 = Ship(self.game.screen_width, self.game.screen_height, self.show_all_players, "4", SHIP4_X, SHIP4_Y,
+                                SHIP_4_PIC, SHIP_4_PIC_THRUST, SHIP_4_PIC_SHIELD, SHIP_4_JOY, lives)
 
             self.ships = [self.ship_1, self.ship_2, self.ship_3, self.ship_4]
 
@@ -923,6 +967,7 @@ class MayhemEnv():
                 for ship in self.ships:
                     ship.reset()
                 play_now = False
+                reactor.stop()
             else:
                 play_now = False
 
@@ -944,13 +989,14 @@ class MayhemEnv():
 
                 # player_name set in init()
                 # { "ship_number":"3", "player_name":"tony, "level":"6", "xpos":"412", "ypos":"517", "angle":"250", "tp":"True", "sp":"False", "shots":[(x,y), (x2, y2), ...] }
-                self.game_client_factory.level  = self.level # only ship_1 can set the level number
-                self.game_client_factory.xpos   = self.ship_x.xposprecise
-                self.game_client_factory.ypos   = self.ship_x.yposprecise
-                self.game_client_factory.angle  = self.ship_x.angle
-                self.game_client_factory.tp     = self.ship_x.thrust_pressed
-                self.game_client_factory.sp     = self.ship_x.shield_pressed
-                self.game_client_factory.landed = self.ship_x.landed
+                self.game_client_factory.level     = self.level # only ship_1 can set the level number
+                self.game_client_factory.xpos      = self.ship_x.xposprecise
+                self.game_client_factory.ypos      = self.ship_x.yposprecise
+                self.game_client_factory.angle     = self.ship_x.angle
+                self.game_client_factory.tp        = self.ship_x.thrust_pressed
+                self.game_client_factory.sp        = self.ship_x.shield_pressed
+                self.game_client_factory.landed    = self.ship_x.landed
+                self.game_client_factory.game_over = self.ship_x.game_over
 
                 particles = []
                 for s in self.ship_x.shots:
@@ -1091,6 +1137,7 @@ class MayhemEnv():
                     o_ship.landed = other_ship["landed"]
                     o_ship.thrust_pressed = other_ship["tp"]
                     o_ship.shield_pressed = other_ship["sp"]
+                    o_ship.game_over = other_ship["game_over"]
 
                     if other_ship["tp"]:
                         o_ship.thrust = True
@@ -1129,7 +1176,7 @@ class MayhemEnv():
 
                     self.active_ships.append(o_ship)
 
-                # collide_map and ship tp ship
+                # collide_map
                 for ship in self.active_ships:
                     ship.collide_map(self.map_buffer, self.map_buffer_mask, self.platforms)
 
@@ -1149,6 +1196,7 @@ class MayhemEnv():
                 for ship in self.active_ships:
                     ship.draw(self.map_buffer)
 
+                # blit the map area around the ship on the screen
                 for ship in self.active_ships:
 
                     if not self.show_all_players:
@@ -1167,16 +1215,17 @@ class MayhemEnv():
                     elif ry > (self.MAP_HEIGHT - ship.view_height):
                         ry = (self.MAP_HEIGHT - ship.view_height)
 
-                    # blit the map area around the ship on the screen
                     sub_area1 = Rect(rx, ry, ship.view_width, ship.view_height)
                     self.game.window.blit(self.map_buffer, (ship.view_left, ship.view_top), sub_area1)
 
                 # debug on screen
                 self.screen_print_info()
 
-                cv = (225, 225, 225)
-                pygame.draw.line( self.game.window, cv, (0, int(self.game.screen_height/2)), (self.game.screen_width, int(self.game.screen_height/2)) )
-                pygame.draw.line( self.game.window, cv, (int(self.game.screen_width/2), 0), (int(self.game.screen_width/2), (self.game.screen_height)) )
+                # split lines
+                if self.show_all_players:
+                    cv = (225, 225, 225)
+                    pygame.draw.line( self.game.window, cv, (0, int(self.game.screen_height/2)), (self.game.screen_width, int(self.game.screen_height/2)) )
+                    pygame.draw.line( self.game.window, cv, (int(self.game.screen_width/2), 0), (int(self.game.screen_width/2), (self.game.screen_height)) )
 
                 # display
                 pygame.display.flip()
@@ -1282,7 +1331,7 @@ class MayhemEnv():
                     for ship in self.ships:
                         ship.update(self, ship.left_pressed, ship.right_pressed, ship.thrust_pressed, ship.shoot_pressed, ship.shield_pressed)
 
-                    # collide_map and ship tp ship
+                    # collide_map
                     for ship in self.ships:
                         ship.collide_map(self.map_buffer, self.map_buffer_mask, self.platforms)
 
@@ -1342,9 +1391,24 @@ class MayhemEnv():
 
         # player names
         if self.game_client_factory:
+            if self.show_all_players:
+                for ship in self.active_ships:
+                    pn = self.myfont.render('%s' % (ship.player_name, ), False, (255, 255, 0))
+                    self.game.window.blit(pn, (ship.view_left, ship.view_top))
+
+            # lives
             for ship in self.active_ships:
-                pn = self.myfont.render('%s' % (ship.player_name, ), False, (255, 255, 0))
-                self.game.window.blit(pn, (ship.view_left, ship.view_top))
+                offset = 0
+                if self.show_all_players:
+                    offset = 20
+                lives = self.myfont.render('%s' % (ship.lives, ), False, (255, 255, 0))
+                self.game.window.blit(lives, (ship.view_left, ship.view_top + offset))
+
+            # game over
+            for ship in self.active_ships:
+                if ship.game_over:
+                    go = self.myfont_big.render('GAME OVER', False, (255, 0, 0))
+                    self.game.window.blit(go, (ship.view_left, ship.view_top + offset + 20))
 
         # debug text
         if self.debug_print:
@@ -1370,14 +1434,19 @@ class MayhemEnv():
 
 class GameWindow():
 
-    def __init__(self, screen_width, screen_height):
+    def __init__(self, screen_width, screen_height, zoom):
 
         pygame.display.set_caption('Mayhem')
 
         self.screen_width = screen_width
         self.screen_height = screen_height
 
-        self.window = pygame.display.set_mode((self.screen_width, self.screen_height), flags=pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE | pygame.SCALED)
+        f = pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE
+        
+        if zoom:
+            f |= pygame.SCALED
+
+        self.window = pygame.display.set_mode((self.screen_width, self.screen_height), flags=f)
 
         # Background
         self.map_1 = pygame.image.load(MAP_1).convert() # .convert_alpha()
@@ -1558,10 +1627,14 @@ class GameClientProtocol(WebSocketClientProtocol):
                 # { "ship_number":"3", "player_name":"tony, "level":"6", "xpos":"412", "ypos":"517", "angle":"250", "tp":"True", "sp":"False", "shots":[(x,y), (x2, y2), ...] }
                 ship_update = { "ship_number":self.factory.ship_number, "player_name":self.factory.player_name, "level":self.factory.level,
                                 "xpos":self.factory.xpos, "ypos":self.factory.ypos, "angle":self.factory.angle, "landed":self.factory.landed,
-                                "tp":self.factory.tp, "sp":self.factory.sp, "shots":self.factory.shots }
+                                "tp":self.factory.tp, "sp":self.factory.sp, "shots":self.factory.shots, "game_over":self.factory.game_over}
                 
                 msg = {"a" : Action.PLAYER_UPDATE, "p":ship_update}
                 self.sendMessage(json.dumps(msg).encode('utf8'))
+
+                if self.factory.game_over:
+                    #print("Game Over, disconnecting...")
+                    reactor.callLater(5, self.dropConnection, abort=True)
 
             elif r["a"] == Action.OTHER_PLAYER_UPDATE:
                 #print("Received another player update: ", r["p"])
@@ -1577,11 +1650,12 @@ class GameClientProtocol(WebSocketClientProtocol):
 
 # -------------------------------------------------------------------------------------------------
 
-class GameClientFactory(WebSocketClientFactory, ReconnectingClientFactory):
+#class GameClientFactory(WebSocketClientFactory, ReconnectingClientFactory):
+class GameClientFactory(WebSocketClientFactory):
 
     def __init__(self, url):
         WebSocketClientFactory.__init__(self, url)
-        ReconnectingClientFactory.__init__(self)
+        #ReconnectingClientFactory.__init__(self)
 
         self._state = Action.LOGIN
 
@@ -1597,14 +1671,15 @@ class GameClientFactory(WebSocketClientFactory, ReconnectingClientFactory):
         self.sp = False
         self.landed = True
         self.shots = []
+        self.game_over = False
 
-    def clientConnectionFailed(self, connector, reason):
-        print("Client connection failed .. retrying ..")
-        self.retry(connector)
+    #def clientConnectionFailed(self, connector, reason):
+    #    print("Client connection failed .. retrying ..")
+    #    self.retry(connector)
 
-    def clientConnectionLost(self, connector, reason):
-        print("Client connection lost .. retrying ..")
-        self.retry(connector)
+    #def clientConnectionLost(self, connector, reason):
+    #    print("Client connection lost .. retrying ..")
+    #    self.retry(connector)
 
 # -------------------------------------------------------------------------------------------------
 
@@ -1645,6 +1720,8 @@ def run():
     parser.add_argument('-sap', '--show_all_players', help='', action="store_true", default=False)
     parser.add_argument('-sc', '--ship_control', help='ship control', action="store", default='k1', choices=("k1", "k2", "j1", "j2"))
 
+    parser.add_argument('-zoom', '--zoom', help='', action="store_true", default=False)
+
     result = parser.parse_args()
     args = dict(result._get_kwargs())
 
@@ -1658,9 +1735,20 @@ def run():
         connectWS(game_client_factory)
     else:
         game_client_factory = None
+        args["show_all_players"] = True
+
+    # trying fixed "nice looking" width/height
+    show_all_players = args["show_all_players"]
+    if show_all_players:
+        width  = 704*2
+        height = 448*2
+    else:
+        width  = 704
+        height = 448
 
     # game env
-    game_window = GameWindow(args["width"], args["height"])
+    #game_window = GameWindow(args["width"], args["height"], args["zoom"])
+    game_window = GameWindow(width, height, args["zoom"])
 
     game_env = MayhemEnv(game_window, level=6, max_fps=args["fps"], debug_print=args["debug_print"], motion=args["motion"],
                     record_play=args["record_play"], play_recorded=args["play_recorded"], player_name=args["player_name"], 

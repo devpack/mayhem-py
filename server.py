@@ -82,8 +82,9 @@ class GameServerProtocol(WebSocketServerProtocol):
             # A player wants to connect, we add it here to the player list 
             #     so that tick() can be called for this player
             if msg["a"] == Action.LOGIN:
-                self.factory.add_player(self)
-                self._state = self.PLAY
+                success = self.factory.add_player(self)
+                if success:
+                    self._state = self.PLAY
             # Other actions are put into the action queue, and going to be processed
             #     into the tick() function
             else:
@@ -181,12 +182,21 @@ class GameServerFactory(WebSocketServerFactory):
 
                 msg = {"a":Action.LOGIN_OK, "p":ship}
                 player.sendMessage(json.dumps(msg).encode('utf8')) # we send bytes
+
+                return True
             else:
                 msg = {"a":Action.LOGIN_DENY, "p":"Room is full"}
                 player.sendMessage(json.dumps(msg).encode('utf8')) # we send bytes
+
+                return False
         else:
             print("Player %s already registered" % player.peer)
 
+            msg = {"a":Action.LOGIN_DENY, "p":"Player already registered"}
+            player.sendMessage(json.dumps(msg).encode('utf8'))
+
+            return False
+            
     def broadcast_msg(self, from_player, update_payload_from_player):
 
         for pl in self.players:
