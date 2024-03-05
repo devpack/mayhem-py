@@ -1,4 +1,4 @@
-import sys, json, threading, enum, queue
+import sys, json, threading, enum, queue, argparse
 
 from twisted.internet import reactor
 from twisted.internet import task
@@ -7,8 +7,15 @@ from twisted.python import log
 from twisted.web.server import Site
 from twisted.web.static import File
 
+from autobahn.exception import Disconnected
 from autobahn.twisted.websocket import WebSocketServerFactory, \
     WebSocketServerProtocol, listenWS
+
+try:
+    import msgpack
+    USE_JSON = False
+except:
+    USE_JSON = True
 
 DEBUG_PRINT = 0
 
@@ -71,24 +78,25 @@ class GameServerProtocol(WebSocketServerProtocol):
 
     # message received from a player 
     def onMessage(self, payload, isBinary):
+
         if isBinary:
-            print("Message was binary")
+            msg = msgpack.unpackb(payload, raw=False)
         else:
             msg = json.loads(payload.decode('utf8'))
 
-            if DEBUG_PRINT:
-                print("Received action=%s, payload=%s, from: %s" % (Action(msg["a"]), msg["p"], self.peer))
+        if DEBUG_PRINT:
+            print("Received action=%s, payload=%s, from: %s" % (Action(msg["a"]), msg["p"], self.peer))
 
-            # A player wants to connect, we add it here to the player list 
-            #     so that tick() can be called for this player
-            if msg["a"] == Action.LOGIN:
-                success = self.factory.add_player(self)
-                if success:
-                    self._state = self.PLAY
-            # Other actions are put into the action queue, and going to be processed
-            #     into the tick() function
-            else:
-                self.add_packet(self, msg)
+        # A player wants to connect, we add it here to the player list 
+        #     so that tick() can be called for this player
+        if msg["a"] == Action.LOGIN:
+            success = self.factory.add_player(self)
+            if success:
+                self._state = self.PLAY
+        # Other actions are put into the action queue, and going to be processed
+        #     into the tick() function
+        else:
+            self.add_packet(self, msg)
 
     def add_packet(self, sender, msg):
         self.packet_queue.put((sender, msg))
@@ -120,7 +128,13 @@ class GameServerProtocol(WebSocketServerProtocol):
 
             # request player update
             msg = {"a":Action.PLAYER_UPDATE_REQUEST, "p":"PLAYER_UPDATE_REQUEST"}
-            self.sendMessage(json.dumps(msg).encode('utf8')) # we send bytes
+            try:
+                if USE_JSON:
+                    self.sendMessage(json.dumps(msg).encode('utf8'))
+                else:
+                    self.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)
+            except Disconnected:
+                print("Could not send %s, client disconnected" % msg)
 
 # -------------------------------------------------------------------------------------------------
 
@@ -181,19 +195,37 @@ class GameServerFactory(WebSocketServerFactory):
                 self.players.append( (player, ship) )
 
                 msg = {"a":Action.LOGIN_OK, "p":ship}
-                player.sendMessage(json.dumps(msg).encode('utf8')) # we send bytes
-
+                try:
+                    if USE_JSON:
+                        player.sendMessage(json.dumps(msg).encode('utf8'))
+                    else:
+                        player.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)    
+                except Disconnected:
+                    print("Could not send %s, client disconnected" % msg)
+            
                 return True
             else:
                 msg = {"a":Action.LOGIN_DENY, "p":"Room is full"}
-                player.sendMessage(json.dumps(msg).encode('utf8')) # we send bytes
+                try:
+                    if USE_JSON:
+                        player.sendMessage(json.dumps(msg).encode('utf8'))
+                    else:
+                        player.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)   
+                except Disconnected:
+                    print("Could not send %s, client disconnected" % msg)
 
                 return False
         else:
             print("Player %s already registered" % player.peer)
 
             msg = {"a":Action.LOGIN_DENY, "p":"Player already registered"}
-            player.sendMessage(json.dumps(msg).encode('utf8'))
+            try:
+                if USE_JSON:
+                    player.sendMessage(json.dumps(msg).encode('utf8'))
+                else:
+                    player.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)   
+            except Disconnected:
+                print("Could not send %s, client disconnected" % msg)
 
             return False
             
@@ -202,8 +234,14 @@ class GameServerFactory(WebSocketServerFactory):
         for pl in self.players:
             if pl[PL_ADDR] != from_player:
                 msg = {"a":Action.OTHER_PLAYER_UPDATE, "p":update_payload_from_player}
-                pl[PL_ADDR].sendMessage(json.dumps(msg).encode('utf8'))
-
+                try:
+                    if USE_JSON:
+                        pl[PL_ADDR].sendMessage(json.dumps(msg).encode('utf8'))
+                    else:
+                        pl[PL_ADDR].sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)   
+                except Disconnected:
+                    print("Could not send %s, client disconnected" % msg)
+                    
                 if DEBUG_PRINT:
                     print("Sent player update from %s to %s" % (from_player, pl[PL_ADDR]))
 
@@ -213,14 +251,29 @@ if __name__ == '__main__':
 
     log.startLogging(sys.stdout)
 
+    if USE_JSON:
+        print("Using json")
+    else:
+        print("Using msgpack")
+
+    # options
+    parser = argparse.ArgumentParser()
+
+    parser.add_argument('-url', '--url', help='', action="store", default="ws://0.0.0.0:4444")
+
+    result = parser.parse_args()
+    args = dict(result._get_kwargs())
+
+    print("Args=", args)
+
     ServerFactory = GameServerFactory
 
-    factory = ServerFactory("ws://0.0.0.0:9000")
+    factory = ServerFactory(args["url"])
     factory.protocol = GameServerProtocol
     listenWS(factory)
 
-    webdir = File(".")
-    web = Site(webdir)
-    reactor.listenTCP(8080, web)
+    #webdir = File(".")
+    #web = Site(webdir)
+    #reactor.listenTCP(8080, web)
 
     reactor.run()

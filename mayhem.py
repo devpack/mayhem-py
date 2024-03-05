@@ -35,6 +35,12 @@ import pygame
 from pygame import gfxdraw
 from pygame.locals import *
 
+try:
+    import msgpack
+    USE_JSON = False
+except:
+    USE_JSON = True
+
 # -------------------------------------------------------------------------------------------------
 # General
 
@@ -1604,45 +1610,52 @@ class GameClientProtocol(WebSocketClientProtocol):
 
         msg = {"a":Action.LOGIN, "p":self.factory.player_name}
 
-        self.sendMessage(json.dumps(msg).encode('utf8'))
+        if USE_JSON:
+            self.sendMessage(json.dumps(msg).encode('utf8'))
+        else:
+            self.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)
 
     def onMessage(self, payload, isBinary):
-        # server send bytes, not str
-        if not isBinary:
+
+        if isBinary:
+            r = msgpack.unpackb(payload, raw=False)
+        else:
             #print("Message received: %s" % payload.decode('utf8'))
             r = json.loads(payload.decode('utf8'))
 
-            if r["a"] == Action.LOGIN_OK:
-                print("Entered in the game as ship n°%s" % r["p"])
-                self.factory.ship_number = str(r["p"]) # we are ship #x in the game
-                self.factory._state = Action.PLAY
+        if r["a"] == Action.LOGIN_OK:
+            print("Entered in the game as ship n°%s" % r["p"])
+            self.factory.ship_number = str(r["p"]) # we are ship #x in the game
+            self.factory._state = Action.PLAY
 
-            elif r["a"] == Action.LOGIN_DENY:
-                print("Failed to enter in the game: %s"  % r["p"])
-                # TODO retry
+        elif r["a"] == Action.LOGIN_DENY:
+            print("Failed to enter in the game: %s"  % r["p"])
+            # TODO retry
 
-            elif r["a"] == Action.PLAYER_UPDATE_REQUEST:
-                #print("Player update requested, sending player update...")
+        elif r["a"] == Action.PLAYER_UPDATE_REQUEST:
+            #print("Player update requested, sending player update...")
 
-                # { "ship_number":"3", "player_name":"tony, "level":"6", "xpos":"412", "ypos":"517", "angle":"250", "tp":"True", "sp":"False", "shots":[(x,y), (x2, y2), ...] }
-                ship_update = { "ship_number":self.factory.ship_number, "player_name":self.factory.player_name, "level":self.factory.level,
-                                "xpos":self.factory.xpos, "ypos":self.factory.ypos, "angle":self.factory.angle, "landed":self.factory.landed,
-                                "tp":self.factory.tp, "sp":self.factory.sp, "shots":self.factory.shots, "game_over":self.factory.game_over}
-                
-                msg = {"a" : Action.PLAYER_UPDATE, "p":ship_update}
+            # { "ship_number":"3", "player_name":"tony, "level":"6", "xpos":"412", "ypos":"517", "angle":"250", "tp":"True", "sp":"False", "shots":[(x,y), (x2, y2), ...] }
+            ship_update = { "ship_number":self.factory.ship_number, "player_name":self.factory.player_name, "level":self.factory.level,
+                            "xpos":self.factory.xpos, "ypos":self.factory.ypos, "angle":self.factory.angle, "landed":self.factory.landed,
+                            "tp":self.factory.tp, "sp":self.factory.sp, "shots":self.factory.shots, "game_over":self.factory.game_over}
+            
+            msg = {"a" : Action.PLAYER_UPDATE, "p":ship_update}
+            
+            if USE_JSON:
                 self.sendMessage(json.dumps(msg).encode('utf8'))
+            else:
+                self.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)
 
-                if self.factory.game_over:
-                    #print("Game Over, disconnecting...")
-                    reactor.callLater(5, self.dropConnection, abort=True)
+            if self.factory.game_over:
+                #print("Game Over, disconnecting...")
+                reactor.callLater(5, self.dropConnection, abort=True)
 
-            elif r["a"] == Action.OTHER_PLAYER_UPDATE:
-                #print("Received another player update: ", r["p"])
+        elif r["a"] == Action.OTHER_PLAYER_UPDATE:
+            #print("Received another player update: ", r["p"])
 
-                ship_update = r["p"]
-                setattr(self.factory, "other_player_%s" % ship_update["ship_number"], ship_update)
-        else:
-            print("Message was binary")
+            ship_update = r["p"]
+            setattr(self.factory, "other_player_%s" % ship_update["ship_number"], ship_update)
 
     def onClose(self, wasClean, code, reason):
         print("Exited from the GameServer")
@@ -1727,6 +1740,11 @@ def run():
 
     print("Args=", args)
 
+    if USE_JSON:
+        print("WARN: Using json, if the server is using msgpack you would need to install it")
+    else:
+        print("Using msgpack")
+        
     # online ?
     if args["server"]:
         print("Going to connect to %s" % args["server"])

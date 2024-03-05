@@ -1,8 +1,8 @@
 # mayhem-py
 
-Python version of the classic Amiga game Mayhem.
+Python version of the classic Amiga game Mayhem. Added support for online gaming (see server.py).
 
-Try the HTML version on: https://devpack.github.io/mayhem-html5
+Try the HTML version on: https://devpack.github.io/mayhem-html5 or https://devpack.itch.io/mayhem
 
 ----
 
@@ -24,12 +24,21 @@ It was then ported to [Raspberry Pi](https://www.raspberrypi.org/) by [Martin O'
 
 ----
 
-The only dependency to install should be PyGame (python3 -m pip install pygame)
+Dependencies: PyGame, Twisted, Autobahn, msgpack (python3 -m pip install -r requirements.txt)
 
-Launch the game:
+Launch the game (local mode):
 
 ```
-python3 mayhem.py --width=1200 --height=800 --nb_player=4 --fps=60
+python3 mayhem.py --width=1200 --height=800 --fps=60
 ```
 
-Keys 1 to 7 to change the map. Two players on the keyboard and 2 on usb Gamepad/Joystick.
+Launch the game (online mode):
+
+```
+python3 mayhem.py --player_name=tony --ship_control=k1 --server=ws://127.0.0.1:4444 -sap
+python3 mayhem.py --player_name=tony --ship_control=k1 --server=ws://127.0.0.1:4444
+python3 mayhem.py --player_name=tony --ship_control=k1 --server=ws://127.0.0.1:4444 -zoom
+python3 mayhem.py --player_name=tony --ship_control=j1 --server=ws://127.0.0.1:4444 -sap
+```
+
+Keys 1 to 7 to change the map (online mode, only ship_1 can change the map). Two players on the keyboard and 2 on usb Gamepad/Joystick.
