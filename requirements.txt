@@ -2,3 +2,6 @@ pygame
 msgpack
 twisted
 autobahn
+moderngl
+numpy
+imgui[pygame]

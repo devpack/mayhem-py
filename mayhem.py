@@ -35,6 +35,13 @@ import pygame
 from pygame import gfxdraw
 from pygame.locals import *
 
+import numpy as np
+import moderngl as mgl
+from shader_program import ShaderProgram
+
+import imgui
+import my_imgui.pygame_imgui as pygame_imgui
+
 try:
     import msgpack
     USE_JSON = False
@@ -55,16 +62,10 @@ USE_MINI_MASK = True # mask the size of the ship (instead of the player view siz
 # -------------------------------------------------------------------------------------------------
 # SHIP dynamics
 
-SLOW_DOWN_COEF = 1.7 # somehow the C++ version is slower with the same physics coef ?
-
-SHIP_MASS = 1.0
-SHIP_THRUST_MAX = 0.3 / SLOW_DOWN_COEF
-SHIP_ANGLESTEP = 5
 SHIP_ANGLE_LAND = 30
-SHIP_MAX_LIVES = 25
+SHIP_MAX_LIVES = 10
 SHIP_SPRITE_SIZE = 32
 
-iG       = 0.08 / SLOW_DOWN_COEF
 iXfrott  = 0.984
 iYfrott  = 0.99
 iCoeffax = 0.6
@@ -354,7 +355,7 @@ class Ship():
 
                     # move debris
                     deb.ax = deb.impultion * -math.cos(math.radians(90 - deb.angle))
-                    deb.ay = iG*5 + (deb.impultion * -math.sin(math.radians(90 - deb.angle)))
+                    deb.ay = env.iG*5 + (deb.impultion * -math.sin(math.radians(90 - deb.angle)))
 
                     deb.vx = deb.vx + (iCoeffax * deb.ax)
                     deb.vy = deb.vy + (iCoeffay * deb.ay)
@@ -436,9 +437,9 @@ class Ship():
 
             # angle
             if left_pressed:
-                self.angle += SHIP_ANGLESTEP
+                self.angle += env.SHIP_ANGLESTEP
             if right_pressed:
-                self.angle -= SHIP_ANGLESTEP
+                self.angle -= env.SHIP_ANGLESTEP
 
             self.angle = self.angle % 360
 
@@ -475,7 +476,7 @@ class Ship():
 
                     #self.thrust += 0.1
                     #if self.thrust >= SHIP_THRUST_MAX:
-                    self.thrust = SHIP_THRUST_MAX
+                    self.thrust = env.SHIP_THRUST_MAX
 
                     if not pygame.mixer.get_busy():
                         self.sound_thrust.play(-1)
@@ -512,16 +513,16 @@ class Ship():
             if not self.landed:
                 # angle
                 if left_pressed:
-                    self.angle += SHIP_ANGLESTEP
+                    self.angle += env.SHIP_ANGLESTEP
                 if right_pressed:
-                    self.angle -= SHIP_ANGLESTEP
+                    self.angle -= env.SHIP_ANGLESTEP
 
                 # 
                 self.angle = self.angle % 360
 
                 # https://gafferongames.com/post/integration_basics/
                 self.ax = self.thrust * -math.cos( math.radians(90 - self.angle) ) # ax = thrust * sin1
-                self.ay = iG + (self.thrust * -math.sin( math.radians(90 - self.angle))) # ay = g + thrust * (-cos1)
+                self.ay = env.iG + (self.thrust * -math.sin( math.radians(90 - self.angle))) # ay = g + thrust * (-cos1)
 
                 # shoot when shield is on
                 if self.impactx or self.impacty:
@@ -643,7 +644,8 @@ class Ship():
                 self.ypos = yflat
                 self.yposprecise = yflat
 
-                if ( (-1.0/SLOW_DOWN_COEF <= self.vx) and (self.vx < 1.0/SLOW_DOWN_COEF) and (-1.0/SLOW_DOWN_COEF < self.vy) and (self.vy < 1.0/SLOW_DOWN_COEF) ):
+                #if ( (-1.0/env.SLOW_DOWN_COEF <= self.vx) and (self.vx < 1.0/env.SLOW_DOWN_COEF) and (-1.0/env.SLOW_DOWN_COEF < self.vy) and (self.vy < 1.0/env.SLOW_DOWN_COEF) ):
+                if ( (-1.0 <= self.vx) and (self.vx < 1.0) and (-1.0 < self.vy) and (self.vy < 1.0) ):
                     self.landed = True
                     self.last_landed_pos = (self.xpos, self.ypos)
                     self.bounce = False
@@ -779,7 +781,9 @@ class MayhemEnv():
 
         # screen
         self.game = game
-        self.game.window.fill((0, 0, 0))
+
+        self.game.screen.fill((0, 0, 0))
+
         self.level = level
         #self.level = randint(1, 5)
         self.motion = motion
@@ -810,6 +814,11 @@ class MayhemEnv():
         self.map_buffer = self.game.getv("map_buffer", current_level=self.level)
         self.map_buffer_mask = self.game.getv("map_buffer_mask", current_level=self.level)
         self.platforms = self.game.getv("platforms", current_level=self.level)
+
+        # game physics
+        self.SHIP_THRUST_MAX    = 0.18
+        self.iG                 = 0.05
+        self.SHIP_ANGLESTEP     = 5
 
         # joystick if any
         if self.game_client_factory:
@@ -845,7 +854,10 @@ class MayhemEnv():
 
         if delta >= 1:
             #fps = f"PyGame FPS: {self.fps.get_fps():3.0f}"
-            fps = 'Mayhem FPS=%.2f' % self.fps.get_fps()
+            gl_mode = "Non OpenGL"
+            if self.game.use_opengl:
+                gl_mode = "OpenGL"
+            fps = 'Mayhem FPS (%s)=%.2f' % (gl_mode, self.fps.get_fps())
             pygame.display.set_caption(fps)
 
             self.lastTime = self.currentTime
@@ -960,6 +972,16 @@ class MayhemEnv():
 
             self.ships = [self.ship_1, self.ship_2, self.ship_3, self.ship_4]
 
+    def show_options_ui(self):
+        imgui.new_frame()
+        imgui.begin("Options", True)
+
+        _, self.SHIP_THRUST_MAX = imgui.slider_float("thrust", self.SHIP_THRUST_MAX, 0.05, 0.5)
+        _, self.iG              = imgui.slider_float("G", self.iG, 0.01, 0.1)
+        _, self.SHIP_ANGLESTEP  = imgui.slider_float("rot", self.SHIP_ANGLESTEP, 1, 10)
+
+        imgui.end()
+
     def game_loop(self):
 
         # we are using twisted loop so no while 1 + self.clock.tick(self.max_fps)
@@ -973,6 +995,8 @@ class MayhemEnv():
                 for ship in self.ships:
                     ship.reset()
                 play_now = False
+                if self.game.use_opengl:
+                    self.game.frame_tex.release()
                 reactor.stop()
             else:
                 play_now = False
@@ -1045,12 +1069,16 @@ class MayhemEnv():
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         self.record_it()
+                        if self.game.use_opengl:
+                            self.game.frame_tex.release()
                         reactor.stop()
                         #sys.exit(0)
 
                     elif event.type == pygame.KEYDOWN:
                         if event.key == pygame.K_ESCAPE:
                             self.record_it()
+                            if self.game.use_opengl:
+                                self.game.frame_tex.release()
                             reactor.stop()
                             #sys.exit(0)
                         elif event.key == pygame.K_p:
@@ -1075,6 +1103,10 @@ class MayhemEnv():
 
                     elif event.type == pygame.KEYUP:
                         self.ship_key_up(event.key, self.ship_x, ship_keys)
+
+                    # imgui event
+                    if self.game.use_opengl and self.game.show_options:
+                        self.game.imgui_renderer.process_event(event)
 
                 # joystick
                 if self.joystick:
@@ -1115,7 +1147,7 @@ class MayhemEnv():
                 self.platforms = self.game.getv("platforms", current_level=self.level)
 
                 # clear screen
-                self.game.window.fill((0,0,0))
+                self.game.screen.fill((0,0,0))
 
                 self.map_buffer.blit(self.map, (0, 0))
 
@@ -1222,16 +1254,33 @@ class MayhemEnv():
                         ry = (self.MAP_HEIGHT - ship.view_height)
 
                     sub_area1 = Rect(rx, ry, ship.view_width, ship.view_height)
-                    self.game.window.blit(self.map_buffer, (ship.view_left, ship.view_top), sub_area1)
 
+                    self.game.screen.blit(self.map_buffer, (ship.view_left, ship.view_top), sub_area1)
+                        
                 # debug on screen
                 self.screen_print_info()
 
                 # split lines
                 if self.show_all_players:
                     cv = (225, 225, 225)
-                    pygame.draw.line( self.game.window, cv, (0, int(self.game.screen_height/2)), (self.game.screen_width, int(self.game.screen_height/2)) )
-                    pygame.draw.line( self.game.window, cv, (int(self.game.screen_width/2), 0), (int(self.game.screen_width/2), (self.game.screen_height)) )
+                    pygame.draw.line( self.game.screen, cv, (0, int(self.game.screen_height/2)), (self.game.screen_width, int(self.game.screen_height/2)) )
+                    pygame.draw.line( self.game.screen, cv, (int(self.game.screen_width/2), 0), (int(self.game.screen_width/2), (self.game.screen_height)) )
+
+                if self.game.use_opengl:
+                    self.game.set_uniform(self.game.screen_program, "time", self.frames)
+
+                    try:
+                        self.game.frame_tex.write(self.game.display.get_view('1'))
+                        #self.frame_tex.write(self.display.get_buffer())
+                    except:
+                        pass
+                    
+                    self.game.vao.render(mode=mgl.TRIANGLE_STRIP)
+
+                    if self.game.show_options:
+                        self.show_options_ui()
+                        imgui.render()
+                        self.game.imgui_renderer.render(imgui.get_draw_data())
 
                 # display
                 pygame.display.flip()
@@ -1244,12 +1293,16 @@ class MayhemEnv():
                 for event in pygame.event.get():
                     if event.type == pygame.QUIT:
                         self.record_it()
+                        if self.game.use_opengl:
+                            self.game.frame_tex.release()
                         reactor.stop()
                         #sys.exit(0)
 
                     elif event.type == pygame.KEYDOWN:
                         if event.key == pygame.K_ESCAPE:
                             self.record_it()
+                            if self.game.use_opengl:
+                                self.game.frame_tex.release()
                             reactor.stop()
                             #sys.exit(0)
                         elif event.key == pygame.K_p:
@@ -1280,6 +1333,10 @@ class MayhemEnv():
                         self.ship_key_up(event.key, self.ship_2, SHIP_2_KEYS)
                         self.ship_key_up(event.key, self.ship_3, SHIP_3_KEYS)
                         self.ship_key_up(event.key, self.ship_4, SHIP_4_KEYS)
+
+                    # imgui event
+                    if self.game.use_opengl and self.game.show_options:
+                        self.game.imgui_renderer.process_event(event)
 
                 # joystick
                 for ship in self.ships:
@@ -1329,7 +1386,7 @@ class MayhemEnv():
                     self.platforms = self.game.getv("platforms", current_level=self.level)
 
                     # clear screen
-                    self.game.window.fill((0,0,0))
+                    self.game.screen.fill((0,0,0))
 
                     self.map_buffer.blit(self.map, (0, 0))
 
@@ -1373,14 +1430,30 @@ class MayhemEnv():
 
                         # blit the map area around the ship on the screen
                         sub_area1 = Rect(rx, ry, ship.view_width, ship.view_height)
-                        self.game.window.blit(self.map_buffer, (ship.view_left, ship.view_top), sub_area1)
+                        self.game.screen.blit(self.map_buffer, (ship.view_left, ship.view_top), sub_area1)
 
                     # debug on screen
                     self.screen_print_info()
 
                     cv = (225, 225, 225)
-                    pygame.draw.line( self.game.window, cv, (0, int(self.game.screen_height/2)), (self.game.screen_width, int(self.game.screen_height/2)) )
-                    pygame.draw.line( self.game.window, cv, (int(self.game.screen_width/2), 0), (int(self.game.screen_width/2), (self.game.screen_height)) )
+                    pygame.draw.line( self.game.screen, cv, (0, int(self.game.screen_height/2)), (self.game.screen_width, int(self.game.screen_height/2)) )
+                    pygame.draw.line( self.game.screen, cv, (int(self.game.screen_width/2), 0), (int(self.game.screen_width/2), (self.game.screen_height)) )
+
+                    if self.game.use_opengl:
+                        self.game.set_uniform(self.game.screen_program, "time", self.frames)
+
+                        try:
+                            self.game.frame_tex.write(self.game.display.get_view('1'))
+                            #self.frame_tex.write(self.display.get_buffer())
+                        except:
+                            pass
+
+                        self.game.vao.render(mode=mgl.TRIANGLE_STRIP)
+
+                        if self.game.show_options:
+                            self.show_options_ui()
+                            imgui.render()
+                            self.game.imgui_renderer.render(imgui.get_draw_data())
 
                     # display
                     pygame.display.flip()
@@ -1400,7 +1473,7 @@ class MayhemEnv():
             if self.show_all_players:
                 for ship in self.active_ships:
                     pn = self.myfont.render('%s' % (ship.player_name, ), False, (255, 255, 0))
-                    self.game.window.blit(pn, (ship.view_left, ship.view_top))
+                    self.game.screen.blit(pn, (ship.view_left, ship.view_top))
 
             # lives
             for ship in self.active_ships:
@@ -1408,52 +1481,97 @@ class MayhemEnv():
                 if self.show_all_players:
                     offset = 20
                 lives = self.myfont.render('%s' % (ship.lives, ), False, (255, 255, 0))
-                self.game.window.blit(lives, (ship.view_left, ship.view_top + offset))
+                self.game.screen.blit(lives, (ship.view_left, ship.view_top + offset))
 
             # game over
             for ship in self.active_ships:
                 if ship.game_over:
                     go = self.myfont_big.render('GAME OVER', False, (255, 0, 0))
-                    self.game.window.blit(go, (ship.view_left, ship.view_top + offset + 20))
+                    self.game.screen.blit(go, (ship.view_left, ship.view_top + offset + 20))
 
         # debug text
         if self.debug_print:
             ship_pos = self.myfont.render('Pos: %s %s' % (self.ship_1.xpos, self.ship_1.ypos), False, (255, 255, 255))
-            self.game.window.blit(ship_pos, (DEBUG_TEXT_XPOS + 5, 30))
+            self.game.screen.blit(ship_pos, (DEBUG_TEXT_XPOS + 5, 30))
 
             ship_va = self.myfont.render('vx=%.2f, vy=%.2f, ax=%.2f, ay=%.2f' % (self.ship_1.vx,self.ship_1.vy, self.ship_1.ax, self.ship_1.ay), False, (255, 255, 255))
-            self.game.window.blit(ship_va, (DEBUG_TEXT_XPOS + 5, 55))
+            self.game.screen.blit(ship_va, (DEBUG_TEXT_XPOS + 5, 55))
 
             ship_angle = self.myfont.render('Angle: %s' % (self.ship_1.angle,), False, (255, 255, 255))
-            self.game.window.blit(ship_angle, (DEBUG_TEXT_XPOS + 5, 80))
+            self.game.screen.blit(ship_angle, (DEBUG_TEXT_XPOS + 5, 80))
 
             dt = self.myfont.render('Frames: %s' % (self.frames,), False, (255, 255, 255))
-            self.game.window.blit(dt, (DEBUG_TEXT_XPOS + 5, 105))
+            self.game.screen.blit(dt, (DEBUG_TEXT_XPOS + 5, 105))
 
             fps = self.myfont.render('FPS: %.2f' % self.clock.get_fps(), False, (255, 255, 255))
-            self.game.window.blit(fps, (DEBUG_TEXT_XPOS + 5, 130))
+            self.game.screen.blit(fps, (DEBUG_TEXT_XPOS + 5, 130))
 
             #ship_lives = self.myfont.render('Lives: %s' % (self.ship_1.lives,), False, (255, 255, 255))
-            #self.game.window.blit(ship_lives, (DEBUG_TEXT_XPOS + 5, 105))
+            #self.game.screen.blit(ship_lives, (DEBUG_TEXT_XPOS + 5, 105))
+
 
 # -------------------------------------------------------------------------------------------------
 
 class GameWindow():
 
-    def __init__(self, screen_width, screen_height, zoom):
+    def __init__(self, screen_width, screen_height, zoom=False, use_opengl=False, show_options=False):
 
         pygame.display.set_caption('Mayhem')
 
         self.screen_width = screen_width
         self.screen_height = screen_height
+        self.use_opengl = use_opengl
+        self.show_options = show_options
 
-        f = pygame.HWSURFACE | pygame.DOUBLEBUF | pygame.RESIZABLE
+        f = pygame.RESIZABLE
         
+        if use_opengl:
+            f |= pygame.DOUBLEBUF | pygame.OPENGL
+
         if zoom:
             f |= pygame.SCALED
 
         self.window = pygame.display.set_mode((self.screen_width, self.screen_height), flags=f)
+        # in non opengl mode we blit directly on the screen window
+        self.screen = self.window
 
+        if use_opengl:
+            # pg.draw on this surface. then this surface is converted into a texture
+            # then this texture is sampled2D in the FS and rendered into the screen (which is a 2 triangles  => quad)
+            self.display = pygame.Surface((self.screen_width, self.screen_height))
+            self.screen = self.display
+
+            # OpenGL context / options
+            self.ctx = mgl.create_context()
+
+            self.ctx.enable(flags=mgl.BLEND)
+
+            quad = [
+                # pos (x, y), uv coords (x, y)
+                -1.0, 1.0, 0.0, 0.0,
+                1.0, 1.0, 1.0, 0.0,
+                -1.0, -1.0, 0.0, 1.0,
+                1.0, -1.0, 1.0, 1.0,
+            ]
+
+            quad_buffer = self.ctx.buffer(data=np.array(quad, dtype='f4'))
+
+            self.all_shaders = ShaderProgram(self.ctx)
+            self.screen_program = self.all_shaders.get_program("screen")
+
+            self.vao = self.ctx.vertex_array(self.screen_program, [(quad_buffer, '2f 2f', 'vert', 'texcoord')])
+
+            self.frame_tex = self.surf_to_texture(self.display)
+            self.frame_tex.use(0)
+            self.screen_program['tex'] = 0
+
+            self.ctx.clear(color=(0.0, 0.0, 0.0))
+
+            if show_options:
+                imgui.create_context()
+                self.imgui_renderer = pygame_imgui.PygameRenderer()
+                imgui.get_io().display_size = self.screen_width, self.screen_height
+        
         # Background
         self.map_1 = pygame.image.load(MAP_1).convert() # .convert_alpha()
         #self.map.set_colorkey( (0, 0, 0) ) # used for the mask, black = background
@@ -1586,6 +1704,20 @@ class GameWindow():
     def getv(self, name, current_level=6):
         return getattr(self, "%s_%s" % (name, str(current_level)))
 
+    def surf_to_texture(self, surf):
+        tex = self.ctx.texture(surf.get_size(), 4)
+        tex.filter = (mgl.NEAREST, mgl.NEAREST)
+        tex.swizzle = 'BGRA'
+        # tex.write(surf.get_view('1'))
+        return tex
+    
+    def set_uniform(self, program, u_name, u_value):
+        try:
+            program[u_name] = u_value
+        except KeyError:
+            pass
+
+
 # -------------------------------------------------------------------------------------------------
 
 class Action(str, enum.Enum):
@@ -1701,7 +1833,7 @@ def run():
     pygame.init()
     #pygame.display.init()
 
-    pygame.mouse.set_visible(False)
+    pygame.mouse.set_visible(True)
     pygame.font.init()
     pygame.mixer.init() # frequency=22050
 
@@ -1734,6 +1866,8 @@ def run():
     parser.add_argument('-sc', '--ship_control', help='ship control', action="store", default='k1', choices=("k1", "k2", "j1", "j2"))
 
     parser.add_argument('-zoom', '--zoom', help='', action="store_true", default=False)
+    parser.add_argument('-opengl', '--opengl', help='', action="store_true", default=False)
+    parser.add_argument('-show_options', '--show_options', help='', action="store_true", default=False)
 
     result = parser.parse_args()
     args = dict(result._get_kwargs())
@@ -1766,14 +1900,15 @@ def run():
 
     # game env
     #game_window = GameWindow(args["width"], args["height"], args["zoom"])
-    game_window = GameWindow(width, height, args["zoom"])
+    game_window = GameWindow(width, height, zoom=args["zoom"], use_opengl=args["opengl"], show_options=args["show_options"])
 
     game_env = MayhemEnv(game_window, level=6, max_fps=args["fps"], debug_print=args["debug_print"], motion=args["motion"],
                     record_play=args["record_play"], play_recorded=args["play_recorded"], player_name=args["player_name"], 
                     show_all_players=args["show_all_players"], ship_control=args["ship_control"], game_client_factory=game_client_factory)
 
     # pygame loop
-    #env.game_loop()
+    #while True:
+    #    game_env.game_loop()
 
     # twisted loop
     tick = task.LoopingCall(game_env.game_loop)
