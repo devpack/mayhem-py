@@ -24,15 +24,21 @@ It was then ported to [Raspberry Pi](https://www.raspberrypi.org/) by [Martin O'
 
 ----
 
-Dependencies: PyGame, Twisted, Autobahn, msgpack, moderngl, numpy, imgui[pygame] (python3 -m pip install -r requirements.txt)
+Dependencies: pygame-ce, pygame-menu-ce, Twisted, Autobahn, msgpack, moderngl, numpy, imgui[pygame] (python3 -m pip install -r requirements.txt). The game works with either pygame or pygame-ce (if you are using pygame, please use pygame-menu instead of pygame-menu-ce), currently it is tested against pygame-ce which has more features. 
 
-Launch the game (local mode):
+Launch the game using pygame-menu to configure the options ("user_settings.dat" contains the saved options):
+
+```
+python3 mayhem.py
+```
+
+Launch the game, local mode (Deprecated but still working):
 
 ```
 python3 mayhem.py --width=1200 --height=800 --fps=60
 ```
 
-Launch the game (online mode):
+Launch the game, online mode (Deprecated but still working):
 
 ```
 python3 mayhem.py --player_name=tony --ship_control=k1 --server=ws://127.0.0.1:4444 -sap

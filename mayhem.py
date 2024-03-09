@@ -35,6 +35,8 @@ import pygame
 from pygame import gfxdraw
 from pygame.locals import *
 
+import pygame_menu
+
 import numpy as np
 import moderngl as mgl
 from shader_program import ShaderProgram
@@ -682,7 +684,6 @@ class Ship():
         if self.explod or self.game_over:
             return
         
-        #game_window.blit(self.image_rotated, (self.view_width/2 + self.view_left + self.rot_xoffset, self.view_height/2 + self.view_top + self.rot_yoffset))
         map_buffer.blit(self.image_rotated, (self.xpos + self.rot_xoffset, self.ypos + self.rot_yoffset))
 
     def collide_map(self, map_buffer, map_buffer_mask, platforms):
@@ -1274,7 +1275,7 @@ class MayhemEnv():
                         #self.frame_tex.write(self.display.get_buffer())
                     except:
                         pass
-                    
+
                     self.game.vao.render(mode=mgl.TRIANGLE_STRIP)
 
                     if self.game.show_options:
@@ -1828,9 +1829,133 @@ class GameClientFactory(WebSocketClientFactory):
 
 # -------------------------------------------------------------------------------------------------
 
+class GameMenu():
+    
+    def __init__(self, user_settings=None):
+
+        if user_settings:
+            default_username = user_settings["player_name"]
+            default_server_url = user_settings["server"]
+
+            default_ship_input = user_settings["ship_control"]
+            if default_ship_input == "k1":
+                default_ship_input = 0
+            elif default_ship_input == "k2":
+                default_ship_input = 1
+            elif default_ship_input == "j1":
+                default_ship_input = 2
+
+            default_sap = user_settings["show_all_players"]
+            if default_sap:
+                default_sap = 0
+            else:
+                default_sap = 1
+
+            default_opengl = user_settings["opengl"]
+            if default_opengl:
+                default_opengl = 0
+            else:
+                default_opengl = 1
+
+            default_zoom = user_settings["zoom"]
+            if default_zoom:
+                default_zoom = 1
+            else:
+                default_zoom = 0
+
+            default_show_options = user_settings["show_options"]
+            if default_show_options:
+                default_show_options = 1
+            else:
+                default_show_options = 0
+
+        # no settings file yet
+        else:
+            default_username = "prn"
+            default_server_url = "None"
+            default_ship_input = 0
+            default_sap = 0
+            default_opengl = 0
+            default_zoom = 0
+            default_show_options = 0
+
+        self.menu_surface = pygame.display.set_mode((1000, 800))
+
+        self.menu = pygame_menu.Menu(
+            width=800, height=700, title='Mayhem',
+            theme=pygame_menu.themes.THEME_DARK
+        )
+
+        self.menu.add.button('PLAY', self.start_game)
+
+        self.user_name = self.menu.add.text_input('Name: ', default=default_username, maxchar=16)
+        self.menu.add.selector('Inputs: ', [('Keyboard 1', 'k1'), ('Keyboard 2', 'k2'), ('Joystick', 'j1')], 
+                               default=default_ship_input, selector_id="ship_control", onchange=self.set_ship_control)
+        
+        self.menu.add.selector('Show all players: ', [('ON', True), ('OFF', False)], default=default_sap, 
+                               selector_id="show_all_players", onchange=self.set_show_all_players)
+        self.menu.add.selector('OpenGL: ', [('ON', True), ('OFF', False)], default=default_opengl, 
+                               selector_id="opengl", onchange=self.set_opengl)
+        self.menu.add.selector('Zoom: ', [('OFF', False), ('ON', True)], default=default_zoom, 
+                               selector_id="zoom", onchange=self.set_zoom)
+        self.menu.add.selector('Show options: ', [('OFF', False), ('ON', True)], default=default_show_options, 
+                               selector_id="show_options", onchange=self.set_show_options)
+        
+        self.server_url = self.menu.add.text_input('Server: ', default=default_server_url)
+
+        self.menu.add.button('Quit', pygame_menu.events.EXIT)
+
+        self.clock = pygame.time.Clock()
+        self.menu_loop = True
+
+        # game params
+        self.ship_control = 'k1'
+        self.show_all_players = True
+
+    def set_opengl(self, selected, value):
+        self.opengl = value
+    def set_zoom(self, selected, value):
+        self.zoom = value
+    def set_show_options(self, selected, value):
+        self.show_options = value
+    def set_show_all_players(self, selected, value):
+        self.show_all_players = value
+    def set_ship_control(self, selected, value):
+        self.ship_control = value
+
+    def start_game(self):
+        self.player_name = self.user_name.get_value()
+        self.server = self.server_url.get_value()
+        self.ship_control = self.menu.get_widget("ship_control").get_value()[0][1]
+        self.show_all_players = self.menu.get_widget("show_all_players").get_value()[0][1]
+        self.show_options = self.menu.get_widget("show_options").get_value()[0][1]
+        self.opengl = self.menu.get_widget("opengl").get_value()[0][1]
+        self.zoom = self.menu.get_widget("zoom").get_value()[0][1]
+        
+        self.menu_loop = False
+
+    def loop(self):
+
+        while self.menu_loop:
+
+            events = pygame.event.get()
+            for event in events:
+
+                if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE):
+                    sys.exit(0)
+
+            self.menu.update(events)
+            self.menu.draw(self.menu_surface)
+
+            pygame.display.flip()
+            self.clock.tick(60)
+
+# -------------------------------------------------------------------------------------------------
+
 def run():
     #pygame.mixer.pre_init(frequency=22050)
     pygame.init()
+    os.environ['SDL_VIDEO_CENTERED'] = '1'
     #pygame.display.init()
 
     pygame.mouse.set_visible(True)
@@ -1866,7 +1991,7 @@ def run():
     parser.add_argument('-sc', '--ship_control', help='ship control', action="store", default='k1', choices=("k1", "k2", "j1", "j2"))
 
     parser.add_argument('-zoom', '--zoom', help='', action="store_true", default=False)
-    parser.add_argument('-opengl', '--opengl', help='', action="store_true", default=False)
+    parser.add_argument('-opengl', '--opengl', help='', action="store_false", default=True)
     parser.add_argument('-show_options', '--show_options', help='', action="store_true", default=False)
 
     result = parser.parse_args()
@@ -1878,19 +2003,51 @@ def run():
         print("WARN: Using json, if the server is using msgpack you would need to install it")
     else:
         print("Using msgpack")
-        
-    # online ?
-    if args["server"]:
-        print("Going to connect to %s" % args["server"])
-        game_client_factory = GameClientFactory(args["server"])
-        game_client_factory.protocol = GameClientProtocol
-        connectWS(game_client_factory)
+
+    # player vars from command line
+    player_name = args["player_name"]
+    ship_control = args["ship_control"]
+    show_all_players = args["show_all_players"]
+    server = args["server"]
+    fps = args["fps"]
+    level = 6
+    opengl = args["opengl"]
+    zoom = args["zoom"]
+    show_options = args["show_options"]
+
+    # GameMenu (player vars from menu)
+
+    # load previous user settings
+    user_settings_file = os.path.join(os.path.dirname(__file__), "user_settings.dat")
+
+    if os.path.exists(user_settings_file):
+        with open(user_settings_file, "rb") as f:
+            user_settings = pickle.load(f)
     else:
-        game_client_factory = None
-        args["show_all_players"] = True
+        user_settings = {}
+    
+    print("user_settings loaded", user_settings)
+
+    gm = GameMenu(user_settings)
+    gm.loop()
+
+    # assign values for our Mayhem env
+    player_name = gm.player_name
+    ship_control = gm.ship_control
+    show_all_players = gm.show_all_players
+    server = gm.server
+    opengl = gm.opengl
+    zoom = gm.zoom
+    show_options = gm.show_options
+
+    # dump user settings
+    user_settings = {"player_name":player_name, "ship_control":ship_control,"show_all_players":show_all_players, 
+                        "server":server, "opengl":opengl, "zoom":zoom, "show_options":show_options}
+    print("user_settings saved", user_settings)
+    with open(user_settings_file, "wb") as f:
+        pickle.dump(user_settings, f, protocol=pickle.HIGHEST_PROTOCOL)
 
     # trying fixed "nice looking" width/height
-    show_all_players = args["show_all_players"]
     if show_all_players:
         width  = 704*2
         height = 448*2
@@ -1898,13 +2055,22 @@ def run():
         width  = 704
         height = 448
 
-    # game env
-    #game_window = GameWindow(args["width"], args["height"], args["zoom"])
-    game_window = GameWindow(width, height, zoom=args["zoom"], use_opengl=args["opengl"], show_options=args["show_options"])
+    # online ?
+    if server and server!="None":
+        print("Going to connect to %s" % server)
+        game_client_factory = GameClientFactory(server)
+        game_client_factory.protocol = GameClientProtocol
+        connectWS(game_client_factory)
+    else:
+        game_client_factory = None
+        show_all_players = True
 
-    game_env = MayhemEnv(game_window, level=6, max_fps=args["fps"], debug_print=args["debug_print"], motion=args["motion"],
-                    record_play=args["record_play"], play_recorded=args["play_recorded"], player_name=args["player_name"], 
-                    show_all_players=args["show_all_players"], ship_control=args["ship_control"], game_client_factory=game_client_factory)
+    # game env
+    game_window = GameWindow(width, height, zoom=zoom, use_opengl=opengl, show_options=show_options)
+
+    game_env = MayhemEnv(game_window, level=level, max_fps=fps, debug_print=args["debug_print"], motion=args["motion"],
+                    record_play=args["record_play"], play_recorded=args["play_recorded"], player_name=player_name, 
+                    show_all_players=show_all_players, ship_control=ship_control, game_client_factory=game_client_factory)
 
     # pygame loop
     #while True:
