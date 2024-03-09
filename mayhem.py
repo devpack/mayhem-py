@@ -1032,8 +1032,8 @@ class MayhemEnv():
                 particles = []
                 for s in self.ship_x.shots:
                     particles.append((s.x, s.y))
-                for d in self.ship_x.debris:
-                    particles.append((d.x, d.y))
+                #for d in self.ship_x.debris:
+                #    particles.append((d.x, d.y))
 
                 self.game_client_factory.shots  = particles
 
@@ -1879,11 +1879,20 @@ class GameMenu():
             default_zoom = 0
             default_show_options = 0
 
-        self.menu_surface = pygame.display.set_mode((1000, 800))
+        self.menu_surface = pygame.display.set_mode((320*3, 256*3))
+
+        self.background_image = pygame_menu.BaseImage(drawing_mode=pygame_menu.baseimage.IMAGE_MODE_FILL,
+                                image_path=os.path.join(os.path.dirname(__file__), "assets", "wiki", "mayhem_menu%s.png" % str(randint(0, 1)))
+        )
+        #self.background_image.set_alpha(255)
+
+        theme = pygame_menu.themes.THEME_DARK
+        theme.background_color = (0, 0, 0, 210)
+        theme.title_bar_style = pygame_menu.widgets.MENUBAR_STYLE_NONE
 
         self.menu = pygame_menu.Menu(
-            width=800, height=700, title='Mayhem',
-            theme=pygame_menu.themes.THEME_DARK
+            width=(320*3)*0.8, height=(256*3)*0.8, title="",
+            theme=theme
         )
 
         self.menu.add.button('PLAY', self.start_game)
@@ -1945,6 +1954,7 @@ class GameMenu():
                     sys.exit(0)
 
             self.menu.update(events)
+            self.background_image.draw(self.menu_surface)
             self.menu.draw(self.menu_surface)
 
             pygame.display.flip()
