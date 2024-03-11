@@ -1027,6 +1027,7 @@ class MayhemEnv():
                 self.game_client_factory.tp        = self.ship_x.thrust_pressed
                 self.game_client_factory.sp        = self.ship_x.shield_pressed
                 self.game_client_factory.landed    = self.ship_x.landed
+                self.game_client_factory.explod    = self.ship_x.explod
                 self.game_client_factory.game_over = self.ship_x.game_over
 
                 particles = []
@@ -1167,6 +1168,10 @@ class MayhemEnv():
                     # but ship 1 changed the level, so we follow and change the level (possible only with force=1)
                     if (other_ship["ship_number"] == "1") and (other_ship["level"] != self.level):
                         self.set_level_and_ships(other_ship["level"], force=True)
+                        self.ship_x.sound_thrust.stop()
+                        self.ship_x.sound_shoot.stop()
+                        self.ship_x.sound_shield.stop()
+                        self.ship_x.sound_bounce.stop()
 
                     o_ship.player_name = other_ship["player_name"]
 
@@ -1174,6 +1179,7 @@ class MayhemEnv():
                     o_ship.ypos   = other_ship["ypos"]
                     o_ship.angle  = other_ship["angle"]
                     o_ship.landed = other_ship["landed"]
+                    o_ship.explod = other_ship["explod"]
                     o_ship.thrust_pressed = other_ship["tp"]
                     o_ship.shield_pressed = other_ship["sp"]
                     o_ship.game_over = other_ship["game_over"]
@@ -1216,8 +1222,9 @@ class MayhemEnv():
                     self.active_ships.append(o_ship)
 
                 # collide_map
-                for ship in self.active_ships:
-                    ship.collide_map(self.map_buffer, self.map_buffer_mask, self.platforms)
+                #for ship in self.active_ships:
+                #    ship.collide_map(self.map_buffer, self.map_buffer_mask, self.platforms)
+                self.ship_x.collide_map(self.map_buffer, self.map_buffer_mask, self.platforms)
 
                 for ship in self.active_ships:
                     ship.collide_ship(self.active_ships)
@@ -1770,7 +1777,7 @@ class GameClientProtocol(WebSocketClientProtocol):
 
             # { "ship_number":"3", "player_name":"tony, "level":"6", "xpos":"412", "ypos":"517", "angle":"250", "tp":"True", "sp":"False", "shots":[(x,y), (x2, y2), ...] }
             ship_update = { "ship_number":self.factory.ship_number, "player_name":self.factory.player_name, "level":self.factory.level,
-                            "xpos":self.factory.xpos, "ypos":self.factory.ypos, "angle":self.factory.angle, "landed":self.factory.landed,
+                            "xpos":self.factory.xpos, "ypos":self.factory.ypos, "angle":self.factory.angle, "landed":self.factory.landed, "explod":self.factory.explod,
                             "tp":self.factory.tp, "sp":self.factory.sp, "shots":self.factory.shots, "game_over":self.factory.game_over}
             
             msg = {"a" : Action.PLAYER_UPDATE, "p":ship_update}
@@ -1817,6 +1824,7 @@ class GameClientFactory(WebSocketClientFactory):
         self.sp = False
         self.landed = True
         self.shots = []
+        self.explod = False
         self.game_over = False
 
     #def clientConnectionFailed(self, connector, reason):
