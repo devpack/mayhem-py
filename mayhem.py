@@ -212,6 +212,8 @@ class Ship():
                 self.view_left = MARGIN_SIZE + self.view_width + MARGIN_SIZE
                 self.view_top = MARGIN_SIZE + self.view_height + MARGIN_SIZE
 
+        self.ship_font = pygame.font.SysFont('Arial', 12)
+
         self.init_xpos = xpos
         self.init_ypos = ypos
         
@@ -679,13 +681,17 @@ class Ship():
 
         return test_it
 
-    def draw(self, map_buffer):
+    def draw(self, map_buffer, render_name=False):
 
         if self.explod or self.game_over:
             return
         
         map_buffer.blit(self.image_rotated, (self.xpos + self.rot_xoffset, self.ypos + self.rot_yoffset))
-
+        
+        if render_name:
+            pn = self.ship_font.render('%s' % (self.player_name, ), False, (128, 128, 128, 128))
+            map_buffer.blit(pn, (self.xpos + SHIP_SPRITE_SIZE - 8, self.ypos - SHIP_SPRITE_SIZE + 8))
+        
     def collide_map(self, map_buffer, map_buffer_mask, platforms):
 
         if self.explod or self.game_over:
@@ -973,6 +979,12 @@ class MayhemEnv():
 
             self.ships = [self.ship_1, self.ship_2, self.ship_3, self.ship_4]
 
+            self.ship_1.thrust_pressed = False
+            self.ship_1.sound_thrust.stop()
+            self.ship_1.sound_shoot.stop()
+            self.ship_1.sound_shield.stop()
+            self.ship_1.sound_bounce.stop()
+            
     def show_options_ui(self):
         imgui.new_frame()
         imgui.begin("Options", True)
@@ -1240,8 +1252,10 @@ class MayhemEnv():
 
                 # blit ship in the map
                 for ship in self.active_ships:
-                    ship.draw(self.map_buffer)
-
+                    if ship == self.ship_x:
+                        ship.draw(self.map_buffer)
+                    else:
+                        ship.draw(self.map_buffer, render_name=True)
                 # blit the map area around the ship on the screen
                 for ship in self.active_ships:
 
@@ -1264,7 +1278,7 @@ class MayhemEnv():
                     sub_area1 = Rect(rx, ry, ship.view_width, ship.view_height)
 
                     self.game.screen.blit(self.map_buffer, (ship.view_left, ship.view_top), sub_area1)
-                        
+
                 # debug on screen
                 self.screen_print_info()
 
@@ -1483,7 +1497,6 @@ class MayhemEnv():
                     pn = self.myfont.render('%s' % (ship.player_name, ), False, (255, 255, 0))
                     self.game.screen.blit(pn, (ship.view_left, ship.view_top))
 
-            # lives
             for ship in self.active_ships:
                 offset = 0
                 if self.show_all_players:
