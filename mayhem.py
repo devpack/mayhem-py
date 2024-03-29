@@ -783,8 +783,6 @@ class MayhemEnv():
 
         # Websoket game client
         self.game_client_factory = game_client_factory
-        if self.game_client_factory:
-            self.game_client_factory.player_name = player_name
 
         # screen
         self.game = game
@@ -1760,8 +1758,9 @@ class GameClientProtocol(WebSocketClientProtocol):
 
     def onOpen(self):
         print("Connected to the GameServer, username=%s" % self.factory.player_name)
+        print("Requesting room_id=%s" % self.factory.room_id)
 
-        msg = {"a":Action.LOGIN, "p":self.factory.player_name}
+        msg = {"a":Action.LOGIN, "p":{"room_id":self.factory.room_id}}
 
         if USE_JSON:
             self.sendMessage(json.dumps(msg).encode('utf8'))
@@ -1777,8 +1776,9 @@ class GameClientProtocol(WebSocketClientProtocol):
             r = json.loads(payload.decode('utf8'))
 
         if r["a"] == Action.LOGIN_OK:
-            print("Entered in the game as ship n°%s" % r["p"])
-            self.factory.ship_number = str(r["p"]) # we are ship #x in the game
+            room_id = str(r["p"]["ship_nb"])
+            print("Entered in the game in room %s as ship n°%s" % (str(r["p"]["room_id"]), str(r["p"]["ship_nb"])))
+            self.factory.ship_number = str(r["p"]["ship_nb"]) # we are ship #x in the game
             self.factory._state = Action.PLAY
 
         elif r["a"] == Action.LOGIN_DENY:
@@ -1819,13 +1819,14 @@ class GameClientProtocol(WebSocketClientProtocol):
 #class GameClientFactory(WebSocketClientFactory, ReconnectingClientFactory):
 class GameClientFactory(WebSocketClientFactory):
 
-    def __init__(self, url):
+    def __init__(self, url, player_name, room_id):
         WebSocketClientFactory.__init__(self, url)
         #ReconnectingClientFactory.__init__(self)
 
         self._state = Action.LOGIN
 
-        self.player_name = ""
+        self.player_name = player_name
+        self.room_id = room_id
         
         #{ ship_number: 1, "player_name":"tony", "level":"6", "xpos":"412", "ypos":"517", "angle":"250", "tp":"True", "sp":"False", landed, "shots":[(x,y), (x2, y2), ...]} }
         self.ship_number = "1"
@@ -1857,6 +1858,7 @@ class GameMenu():
         if user_settings:
             default_username = user_settings["player_name"]
             default_server_url = user_settings["server"]
+            default_room_id = user_settings["room_id"]
 
             default_ship_input = user_settings["ship_control"]
             if default_ship_input == "k1":
@@ -1894,6 +1896,7 @@ class GameMenu():
         else:
             default_username = "prn"
             default_server_url = "None"
+            default_room_id = "0"
             default_ship_input = 0
             default_sap = 0
             default_opengl = 0
@@ -1932,6 +1935,7 @@ class GameMenu():
                                selector_id="show_options", onchange=self.set_show_options)
         
         self.server_url = self.menu.add.text_input('Server: ', default=default_server_url)
+        self.room_id_text = self.menu.add.text_input('Room ID: ', default=default_room_id, maxchar=8)
 
         self.menu.add.button('Quit', pygame_menu.events.EXIT)
 
@@ -1956,6 +1960,7 @@ class GameMenu():
     def start_game(self):
         self.player_name = self.user_name.get_value()
         self.server = self.server_url.get_value()
+        self.room_id = self.room_id_text.get_value()
         self.ship_control = self.menu.get_widget("ship_control").get_value()[0][1]
         self.show_all_players = self.menu.get_widget("show_all_players").get_value()[0][1]
         self.show_options = self.menu.get_widget("show_options").get_value()[0][1]
@@ -2018,6 +2023,7 @@ def run():
 
     parser.add_argument('-server', '--server', help='', action="store", default="")
     parser.add_argument('-pn', '--player_name', help='', action="store", default="tony")
+    parser.add_argument('-rid', '--room_id', help='', action="store", default="0")
     parser.add_argument('-sap', '--show_all_players', help='', action="store_true", default=False)
     parser.add_argument('-sc', '--ship_control', help='ship control', action="store", default='k1', choices=("k1", "k2", "j1", "j2"))
 
@@ -2037,6 +2043,7 @@ def run():
 
     # player vars from command line
     player_name = args["player_name"]
+    room_id = args["room_id"]
     ship_control = args["ship_control"]
     show_all_players = args["show_all_players"]
     server = args["server"]
@@ -2064,6 +2071,7 @@ def run():
 
     # assign values for our Mayhem env
     player_name = gm.player_name
+    room_id = gm.room_id
     ship_control = gm.ship_control
     show_all_players = gm.show_all_players
     server = gm.server
@@ -2073,7 +2081,7 @@ def run():
 
     # dump user settings
     user_settings = {"player_name":player_name, "ship_control":ship_control,"show_all_players":show_all_players, 
-                        "server":server, "opengl":opengl, "zoom":zoom, "show_options":show_options}
+                        "server":server, "opengl":opengl, "zoom":zoom, "show_options":show_options, "room_id":room_id}
     print("user_settings saved", user_settings)
     with open(user_settings_file, "wb") as f:
         pickle.dump(user_settings, f, protocol=pickle.HIGHEST_PROTOCOL)
@@ -2089,7 +2097,7 @@ def run():
     # online ?
     if server and server!="None":
         print("Going to connect to %s" % server)
-        game_client_factory = GameClientFactory(server)
+        game_client_factory = GameClientFactory(server, player_name, room_id)
         game_client_factory.protocol = GameClientProtocol
         connectWS(game_client_factory)
     else:

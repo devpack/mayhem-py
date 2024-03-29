@@ -1,8 +1,8 @@
 # mayhem-py
 
-Python version of the classic Amiga game Mayhem. Added support for online gaming (see server.py).
+Python version of the classic Amiga game Mayhem, with support for online gaming (see bellow).
 
-Try the HTML version on: https://devpack.github.io/mayhem-html5 or https://devpack.itch.io/mayhem
+Try the HTML version (local gaming only) on: https://devpack.github.io/mayhem-html5 or https://devpack.itch.io/mayhem
 
 ----
 
@@ -24,13 +24,31 @@ It was then ported to [Raspberry Pi](https://www.raspberrypi.org/) by [Martin O'
 
 ----
 
-Dependencies: pygame-ce, pygame-menu-ce, Twisted, Autobahn, msgpack, moderngl, numpy, imgui[pygame] (python3 -m pip install -r requirements.txt). The game works with either pygame or pygame-ce (if you are using pygame, please use pygame-menu instead of pygame-menu-ce), currently it is tested against pygame-ce which has more features. 
+Dependencies: pygame-ce, pygame-menu-ce, Twisted, Autobahn, msgpack, moderngl, numpy, imgui[pygame] (python3 -m pip install -r requirements.txt).
 
-Launch the game using pygame-menu to configure the options ("user_settings.dat" contains the saved options):
+The game works with either pygame or pygame-ce (if you are using pygame, please use pygame-menu instead of pygame-menu-ce), currently it is tested against pygame-ce which has more features. 
+
+Launch the game using pygame-menu to configure the options ("user_settings.dat" contains the saved options (note: you may need to remove this file between game updates)):
 
 ```
 python3 mayhem.py
 ```
+
+Run a GameServer (allow online gaming with friends):
+
+```
+python3 server.py
+```
+
+Local server url example: ws://127.0.0.1:4444
+
+Room ID: any number (or str). 0 has a special meaning: find the first room where there is space left (or creates one if none found). Any room has a size of 4 players.
+
+![Menu](https://github.com/devpack/mayhem-py/blob/main/assets/wiki/menu.png)
+
+![Online_Game](https://github.com/devpack/mayhem-py/blob/main/assets/wiki/online_game.png)
+
+TODO: Host a public facing GameServer.
 
 Launch the game, local mode (Deprecated but still working):
 
