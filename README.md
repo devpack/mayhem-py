@@ -6,24 +6,6 @@ Try the HTML version (local gaming only) on: https://devpack.github.io/mayhem-ht
 
 ----
 
-The original game by [Espen Skoglund](http://hol.abime.net/3853) was born in the early 90s on the Commodore Amiga. That was the great time of MC68000 Assembly.
-
-![Mayhem game image](https://github.com/devpack/mayhem-py/blob/main/assets/wiki/mayhem_amiga.jpg)
-
-[Video of the original Amiga game](https://www.youtube.com/watch?v=fs30DLGxqhs)
-
-----
-
-Around 2000 we made a [PC version](https://github.com/devpack/mayhem) of the game in C++.
-
-It was then ported to [Raspberry Pi](https://www.raspberrypi.org/) by [Martin O'Hanlon](https://github.com/martinohanlon/mayhem-pi), even new gfx levels were added.
-
-![Mayhem2](https://github.com/devpack/mayhem-py/blob/main/assets/wiki/mayhem2.jpg)
-
-[Video - new level](https://youtu.be/E3mho6J6OG8)
-
-----
-
 Dependencies: pygame-ce, pygame-menu-ce, Twisted, Autobahn, msgpack, moderngl, numpy, imgui[pygame] (python3 -m pip install -r requirements.txt).
 
 The game works with either pygame or pygame-ce (if you are using pygame, please use pygame-menu instead of pygame-menu-ce), currently it is tested against pygame-ce which has more features. 
@@ -76,3 +58,21 @@ Some options to play with:
 -show_options : GUI to change the game physics (OpenGL mode is mandatory for this option to work)
 -ship_control : two keyboard layout, "k1" and "k2" ; "j1" for usb joystick
 ```
+
+----
+
+The original game by [Espen Skoglund](http://hol.abime.net/3853) was born in the early 90s on the Commodore Amiga. That was the great time of MC68000 Assembly.
+
+![Mayhem game image](https://github.com/devpack/mayhem-py/blob/main/assets/wiki/mayhem_amiga.jpg)
+
+[Video of the original Amiga game](https://www.youtube.com/watch?v=fs30DLGxqhs)
+
+----
+
+Around 2000 we made a [PC version](https://github.com/devpack/mayhem) of the game in C++.
+
+It was then ported to [Raspberry Pi](https://www.raspberrypi.org/) by [Martin O'Hanlon](https://github.com/martinohanlon/mayhem-pi), even new gfx levels were added.
+
+![Mayhem2](https://github.com/devpack/mayhem-py/blob/main/assets/wiki/mayhem2.jpg)
+
+[Video - new level](https://youtu.be/E3mho6J6OG8)
