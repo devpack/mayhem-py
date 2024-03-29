@@ -16,6 +16,8 @@ Launch the game using pygame-menu to configure the options ("user_settings.dat" 
 python3 mayhem.py
 ```
 
+Keys 1 to 7 to change the map (online mode: only ship_1 can change the map). Two players on the keyboard and 2 on usb Gamepad/Joystick. Keyboard 1 = w (z), x, c, v, g ; Keyboard 2 = left, right, 0, ., enter
+
 Run a GameServer (allow online gaming with friends):
 
 ```
@@ -46,8 +48,6 @@ python3 mayhem.py --player_name=tony --ship_control=k1 --server=ws://127.0.0.1:4
 python3 mayhem.py --player_name=tony --ship_control=k1 --server=ws://127.0.0.1:4444 -zoom
 python3 mayhem.py --player_name=tony --ship_control=j1 --server=ws://127.0.0.1:4444 -sap
 ```
-
-Keys 1 to 7 to change the map (online mode, only ship_1 can change the map). Two players on the keyboard and 2 on usb Gamepad/Joystick.
 
 Some options to play with:
 
