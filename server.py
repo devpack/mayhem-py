@@ -7,11 +7,7 @@ from twisted.python import log
 from autobahn.exception import Disconnected
 from autobahn.twisted.websocket import WebSocketServerFactory, WebSocketServerProtocol, listenWS
 
-try:
-    import msgpack
-    USE_JSON = False
-except:
-    USE_JSON = True
+import msgpack
 
 DEBUG_PRINT = 0
 
@@ -61,6 +57,8 @@ class Action(str, enum.Enum):
     SERVER_STAT_OK = enum.auto()
     SERVER_STAT_UPDATE = enum.auto()
 
+    OTHER_PLAYER_DISCONNECT = enum.auto()
+
 # -------------------------------------------------------------------------------------------------
 
 class PlayerProtocol(WebSocketServerProtocol):
@@ -80,15 +78,11 @@ class PlayerProtocol(WebSocketServerProtocol):
     # a player quits, we remove it
     def onClose(self, wasClean, code, reason):
         self.factory.del_player(self)
-        # TODO send disconnet packet to the players
 
     # message received from a player 
     def onMessage(self, payload, isBinary):
 
-        if isBinary:
-            msg = msgpack.unpackb(payload, raw=False)
-        else:
-            msg = json.loads(payload.decode('utf8'))
+        msg = msgpack.unpackb(payload, raw=False)
 
         if DEBUG_PRINT:
             print("Received action=%s, payload=%s, from: %s" % (Action(msg["a"]), msg["p"], self.peer))
@@ -121,10 +115,7 @@ class PlayerProtocol(WebSocketServerProtocol):
             self.factory.add_watcher(self)
 
             msg = {"a":Action.SERVER_STAT_OK, "p":""}
-            if USE_JSON:
-                self.sendMessage(json.dumps(msg).encode('utf8'))
-            else:
-                self.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)
+            self.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)
 
         # Other actions are put into the action queue, and going to be processed
         #     into the tick() function
@@ -159,15 +150,11 @@ class PlayerProtocol(WebSocketServerProtocol):
                 print("Request player update for %s" % self)
 
             # request player update
-            if 1:
-                msg = {"a":Action.PLAYER_UPDATE_REQUEST, "p":"PLAYER_UPDATE_REQUEST"}
-                try:
-                    if USE_JSON:
-                        self.sendMessage(json.dumps(msg).encode('utf8'))
-                    else:
-                        self.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)
-                except Disconnected:
-                    print("Could not send %s, client disconnected" % msg)
+            msg = {"a":Action.PLAYER_UPDATE_REQUEST, "p":"PLAYER_UPDATE_REQUEST"}
+            try:
+                self.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)
+            except Disconnected:
+                print("Could not send %s, client disconnected" % msg)
 
 # -------------------------------------------------------------------------------------------------
 
@@ -176,7 +163,7 @@ class GameServerFactory(WebSocketServerFactory):
     def __init__(self, url):
         WebSocketServerFactory.__init__(self, url)
 
-        # { room_id : {"ships":[1, 2, 3, 4], "players":[{"address":xxx, "ship_nb"}, ...] }
+        # { room_id : {"ships":[1, 2, 3, 4], "players":[] }
         self.rooms = {}
 
         self.add_player_lock = threading.Lock()
@@ -194,10 +181,7 @@ class GameServerFactory(WebSocketServerFactory):
                 
             msg = {"a":Action.SERVER_STAT_UPDATE, "p":{"state":repr(self.rooms)}}
             try:
-                if USE_JSON:
-                    watcher.sendMessage(json.dumps(msg).encode('utf8'))
-                else:
-                    watcher.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)
+                watcher.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)
             except Disconnected:
                 print("Could not send %s, watcher disconnected" % msg)
 
@@ -208,10 +192,7 @@ class GameServerFactory(WebSocketServerFactory):
         # initial status
         msg = {"a":Action.SERVER_STAT_UPDATE, "p":{"state":repr(self.rooms)}}
         try:
-            if USE_JSON:
-                watcher.sendMessage(json.dumps(msg).encode('utf8'))
-            else:
-                watcher.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)
+            watcher.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)
         except Disconnected:
             print("Could not send %s, watcher disconnected" % msg)
 
@@ -241,7 +222,15 @@ class GameServerFactory(WebSocketServerFactory):
                 if not self.rooms[player.room_id]["players"]:
                     del self.rooms[player.room_id]
                     print(f"Room {player.room_id} is empty, remove it")
-
+                else:
+                    # warn the other players in the room that we disconnected
+                    for ply in self.rooms[player.room_id]["players"]:
+                        msg = {"a":Action.OTHER_PLAYER_DISCONNECT, "p":player.ship_nb}
+                        try:
+                            ply.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)   
+                        except Disconnected:
+                            print("Could not send %s, client disconnected" % msg)
+                
             except Exception as e:
                 print("Failed to remove %s : %s" % (repr(player), repr(e)))
                 
@@ -273,10 +262,7 @@ class GameServerFactory(WebSocketServerFactory):
 
                     msg = {"a":Action.LOGIN_OK, "p": {"ship_nb":player.ship_nb, "room_id":player.room_id}}
                     try:
-                        if USE_JSON:
-                            player.sendMessage(json.dumps(msg).encode('utf8'))
-                        else:
-                            player.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)    
+                        player.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)    
                     except Disconnected:
                         print("Could not send %s, client disconnected" % msg)
                 
@@ -307,10 +293,7 @@ class GameServerFactory(WebSocketServerFactory):
             # send login OK to the player and its ship number (1)
             msg = {"a":Action.LOGIN_OK, "p":{"ship_nb":player.ship_nb, "room_id":player.room_id}}
             try:
-                if USE_JSON:
-                    player.sendMessage(json.dumps(msg).encode('utf8'))
-                else:
-                    player.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)    
+                player.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)    
             except Disconnected:
                 print("Could not send %s, client disconnected" % msg)
         
@@ -329,17 +312,14 @@ class GameServerFactory(WebSocketServerFactory):
 
                     ship = self.rooms[player.room_id]["ships"].pop(0) # first ship available in ships list
 
-                    self.rooms[player.room_id]["players"].append(player) # TODO .append(player.peer)
+                    self.rooms[player.room_id]["players"].append(player) # .append(player.peer)
                     player.ship_nb = ship
                     
                     print(f"Assigned ship #{ship} in room {player.room_id} to player {player}")
 
                     msg = {"a":Action.LOGIN_OK, "p":{"ship_nb":player.ship_nb, "room_id":player.room_id}}
                     try:
-                        if USE_JSON:
-                            player.sendMessage(json.dumps(msg).encode('utf8'))
-                        else:
-                            player.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)    
+                        player.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)    
                     except Disconnected:
                         print("Could not send %s, client disconnected" % msg)
                 
@@ -351,10 +331,7 @@ class GameServerFactory(WebSocketServerFactory):
                 else:
                     msg = {"a":Action.LOGIN_DENY, "p":"Room is full"}
                     try:
-                        if USE_JSON:
-                            player.sendMessage(json.dumps(msg).encode('utf8'))
-                        else:
-                            player.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)   
+                        player.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)   
                     except Disconnected:
                         print("Could not send %s, client disconnected" % msg)
 
@@ -378,10 +355,7 @@ class GameServerFactory(WebSocketServerFactory):
                 # send login OK to the player and its ship number (1)
                 msg = {"a":Action.LOGIN_OK, "p":{"ship_nb":player.ship_nb, "room_id":player.room_id}}
                 try:
-                    if USE_JSON:
-                        player.sendMessage(json.dumps(msg).encode('utf8'))
-                    else:
-                        player.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)    
+                    player.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)    
                 except Disconnected:
                     print("Could not send %s, client disconnected" % msg)
             
@@ -396,10 +370,7 @@ class GameServerFactory(WebSocketServerFactory):
             if player != from_player:
                 msg = {"a":Action.OTHER_PLAYER_UPDATE, "p":update_payload_from_player}
                 try:
-                    if USE_JSON:
-                        player.sendMessage(json.dumps(msg).encode('utf8'))
-                    else:
-                        player.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)   
+                    player.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)   
                 except Disconnected:
                     print("Could not send %s, client disconnected" % msg)
                     
@@ -411,11 +382,6 @@ class GameServerFactory(WebSocketServerFactory):
 if __name__ == '__main__':
 
     log.startLogging(sys.stdout)
-
-    if USE_JSON:
-        print("Using json")
-    else:
-        print("Using msgpack")
 
     # options
     parser = argparse.ArgumentParser()

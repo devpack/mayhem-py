@@ -22,6 +22,8 @@ class Action(str, enum.Enum):
     SERVER_STAT_OK = enum.auto()
     SERVER_STAT_UPDATE = enum.auto()
 
+    OTHER_PLAYER_DISCONNECT = enum.auto()
+
 # -------------------------------------------------------------------------------------------------
 
 class GameClientProtocol(WebSocketClientProtocol):

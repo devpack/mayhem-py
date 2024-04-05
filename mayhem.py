@@ -44,11 +44,7 @@ from shader_program import ShaderProgram
 import imgui
 import my_imgui.pygame_imgui as pygame_imgui
 
-try:
-    import msgpack
-    USE_JSON = False
-except:
-    USE_JSON = True
+import msgpack
 
 # -------------------------------------------------------------------------------------------------
 # General
@@ -65,7 +61,7 @@ USE_MINI_MASK = True # mask the size of the ship (instead of the player view siz
 # SHIP dynamics
 
 SHIP_ANGLE_LAND = 30
-SHIP_MAX_LIVES = 10
+SHIP_MAX_LIVES = 20
 SHIP_SPRITE_SIZE = 32
 
 iXfrott  = 0.984
@@ -212,6 +208,7 @@ class Ship():
                 self.view_left = MARGIN_SIZE + self.view_width + MARGIN_SIZE
                 self.view_top = MARGIN_SIZE + self.view_height + MARGIN_SIZE
 
+        self.ship_number = ship_number
         self.ship_font = pygame.font.SysFont('Arial', 12)
 
         self.init_xpos = xpos
@@ -396,6 +393,9 @@ class Ship():
 
             if self.explod_tick > env.max_fps * 2:
                 self.reset()
+
+                # remove other_player_x from the game_factory if needed
+                #env.remove_other_player(self.ship_number)
     
     def update(self, env, left_pressed, right_pressed, thrust_pressed, shoot_pressed, shield_pressed):
 
@@ -774,7 +774,7 @@ class MayhemEnv():
                  play_recorded="", player_name="tony", show_all_players=False, ship_control="k1", 
                  game_client_factory=None):
 
-        self.myfont = pygame.font.SysFont('Arial', 20)
+        self.myfont = pygame.font.SysFont('Arial', 18)
         self.myfont_big = pygame.font.SysFont('Arial', 48, bold=True)
 
         self.player_name = player_name
@@ -862,7 +862,13 @@ class MayhemEnv():
             gl_mode = "Non OpenGL"
             if self.game.use_opengl:
                 gl_mode = "OpenGL"
-            fps = 'Mayhem FPS (%s)=%.2f' % (gl_mode, self.fps.get_fps())
+
+            if not self.game_client_factory:
+                fps = 'Mayhem FPS (%s)=%.2f' % (gl_mode, self.fps.get_fps())
+            else:
+                fps = 'Mayhem (server=%s, room=%s) FPS (%s)=%.2f' % \
+                      (self.game_client_factory.server_url, self.game_client_factory.room_id, gl_mode, self.fps.get_fps())
+
             pygame.display.set_caption(fps)
 
             self.lastTime = self.currentTime
@@ -905,7 +911,21 @@ class MayhemEnv():
             ship.shoot_pressed = False
         if key == key_mapping["shield"]:
             ship.shield_pressed = False
-            
+
+    def remove_other_player(self, ship_number):
+        if self.game_client_factory:
+            try:
+                if ship_number in ("1", 1):
+                    del self.game_client_factory.other_player_1
+                elif ship_number in ("2", 2):
+                    del self.game_client_factory.other_player_2
+                elif ship_number in ("3", 3):
+                    del self.game_client_factory.other_player_3
+                elif ship_number in ("4", 4):
+                    del self.game_client_factory.other_player_4
+            except:
+                pass
+
     def set_level_and_ships(self, level_nb, force=False):
 
         change_level_allowed = True
@@ -977,11 +997,15 @@ class MayhemEnv():
 
             self.ships = [self.ship_1, self.ship_2, self.ship_3, self.ship_4]
 
-            self.ship_1.thrust_pressed = False
-            self.ship_1.sound_thrust.stop()
-            self.ship_1.sound_shoot.stop()
-            self.ship_1.sound_shield.stop()
-            self.ship_1.sound_bounce.stop()
+            try:
+                self.ship_x.thrust_pressed = False
+                self.ship_x.sound_thrust.stop()
+                self.ship_x.sound_shoot.stop()
+                self.ship_x.sound_shield.stop()
+                self.ship_x.sound_bounce.stop()
+                self.ship_x.sound_explod.stop()
+            except:
+                pass
             
     def show_options_ui(self):
         imgui.new_frame()
@@ -993,498 +1017,486 @@ class MayhemEnv():
 
         imgui.end()
 
-    def game_loop(self):
+    def game_loop_online(self):
 
-        # we are using twisted loop so no while 1 + self.clock.tick(self.max_fps)
-        #while True:
-
-        # online play ?
-        if self.game_client_factory:
-            if self.game_client_factory._state == Action.PLAY:
-                play_now = True
-            elif self.game_client_factory._state == Action.EXITED:
-                for ship in self.ships:
-                    ship.reset()
-                play_now = False
-                if self.game.use_opengl:
-                    self.game.frame_tex.release()
-                reactor.stop()
-            else:
-                play_now = False
-
-        # local play
-        else:
+        if self.game_client_factory._state == Action.PLAY:
             play_now = True
+        elif self.game_client_factory._state == Action.EXITED:
+            for ship in self.ships:
+                ship.reset()
+            play_now = False
+            if self.game.use_opengl:
+                self.game.frame_tex.release()
+            reactor.stop()
+        else:
+            play_now = False
 
         # play loop
         if play_now:
 
-            if self.game_client_factory:
-
-                # 1. -------
-                # Set our player status in self.game_client_factory: will be send each time we received a message action = Action.PLAYER_UPDATE_REQUEST
-
-                # self.game_client_factory.ship_number is set by the server when we logged
-                self.ship_x = getattr(self, "ship_%s" % self.game_client_factory.ship_number)
-                self.ship_x.player_name = self.player_name
-
-                # player_name set in init()
-                # { "ship_number":"3", "player_name":"tony, "level":"6", "xpos":"412", "ypos":"517", "angle":"250", "tp":"True", "sp":"False", "shots":[(x,y), (x2, y2), ...] }
-                self.game_client_factory.level     = self.level # only ship_1 can set the level number
-                self.game_client_factory.xpos      = self.ship_x.xposprecise
-                self.game_client_factory.ypos      = self.ship_x.yposprecise
-                self.game_client_factory.angle     = self.ship_x.angle
-                self.game_client_factory.tp        = self.ship_x.thrust_pressed
-                self.game_client_factory.sp        = self.ship_x.shield_pressed
-                self.game_client_factory.landed    = self.ship_x.landed
-                self.game_client_factory.explod    = self.ship_x.explod
-                self.game_client_factory.game_over = self.ship_x.game_over
-
-                particles = []
-                for s in self.ship_x.shots:
-                    particles.append((s.x, s.y))
-                #for d in self.ship_x.debris:
-                #    particles.append((d.x, d.y))
-
-                self.game_client_factory.shots  = particles
-
-                # 2. -------
-                # Get other players status if any
-
-                self.other_ships = []
-
-                others = ["1", "2", "3", "4"]
-                others.remove(self.game_client_factory.ship_number) # remove ourself from the list
-
-                for ship_number in others:
-                    try:
-                        ship_update = getattr(self.game_client_factory, "other_player_%s" % ship_number)
-                    except:
-                        ship_update = None
-
-                    if ship_update:
-                        self.other_ships.append(ship_update)
-
-                #print("other_ships=", self.other_ships)
-
-                # 1. self.ship_x is the ship we play with, this will update its posx etc. and we change the states of self.game_client_factory based on that
-                #    then our player xpos etc. will be transmitted throught self.game_client_factory each time we receive a message Action.PLAYER_UPDATE_REQUEST
-                #
-                # 2. self.other_ships contains the other ships last updates we got from the server (message Action.OTHER_PLAYER_UPDATE)
-                #    then we need to render those ships and process collision etc accordingly
-
-                ship_keys = SHIP_2_KEYS
-                if self.ship_control == "k2":
-                    ship_keys = SHIP_1_KEYS
-
-                # events
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        self.record_it()
-                        if self.game.use_opengl:
-                            self.game.frame_tex.release()
-                        reactor.stop()
-                        #sys.exit(0)
-
-                    elif event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_ESCAPE:
-                            self.record_it()
-                            if self.game.use_opengl:
-                                self.game.frame_tex.release()
-                            reactor.stop()
-                            #sys.exit(0)
-                        elif event.key == pygame.K_p:
-                            self.paused = not self.paused
-
-                        elif event.key == pygame.K_1:
-                            self.set_level_and_ships(1)
-                        elif event.key == pygame.K_2:
-                            self.set_level_and_ships(2)
-                        elif event.key == pygame.K_3:
-                            self.set_level_and_ships(3)
-                        elif event.key == pygame.K_4:
-                            self.set_level_and_ships(4)
-                        elif event.key == pygame.K_5:
-                            self.set_level_and_ships(5)
-                        elif event.key == pygame.K_6:
-                            self.set_level_and_ships(6)
-                        elif event.key == pygame.K_7:
-                            self.set_level_and_ships(7)
-
-                        self.ship_key_down(event.key, self.ship_x, ship_keys)
-
-                    elif event.type == pygame.KEYUP:
-                        self.ship_key_up(event.key, self.ship_x, ship_keys)
-
-                    # imgui event
-                    if self.game.use_opengl and self.game.show_options:
-                        self.game.imgui_renderer.process_event(event)
-
-                # joystick
-                if self.joystick:
-                    try:
-                        if self.joystick.get_button(0):
-                            self.ship_x.thrust_pressed = True
-                        else:
-                            self.ship_x.thrust_pressed = False
-
-                        if self.joystick.get_button(5):
-                            self.ship_x.shoot_pressed = True
-                        else:
-                            self.ship_x.shoot_pressed = False
-
-                        if self.joystick.get_button(1):
-                            self.ship_x.shield_pressed = True
-                        else:
-                            self.ship_x.shield_pressed = False
-
-                        horizontal_axis = self.joystick.get_axis(0)
-
-                        if int(round(horizontal_axis)) == 1:
-                            self.ship_x.right_pressed = True
-                        else:
-                            self.ship_x.right_pressed = False
-
-                        if int(round(horizontal_axis)) == -1:
-                            self.ship_x.left_pressed = True
-                        else:
-                            self.ship_x.left_pressed = False
-                    except:
-                        pass
-
-                # per level data
-                self.map = self.game.getv("map", current_level=self.level)
-                self.map_buffer = self.game.getv("map_buffer", current_level=self.level)
-                self.map_buffer_mask = self.game.getv("map_buffer_mask", current_level=self.level)
-                self.platforms = self.game.getv("platforms", current_level=self.level)
-
-                # clear screen
-                self.game.screen.fill((0,0,0))
-
-                self.map_buffer.blit(self.map, (0, 0))
-
-                # update ship pos
-                self.ship_x.update(self, self.ship_x.left_pressed, self.ship_x.right_pressed, self.ship_x.thrust_pressed, 
-                                   self.ship_x.shoot_pressed, self.ship_x.shield_pressed)
-
-                self.active_ships = []
-                self.active_ships.append(self.ship_x)
-
-                # { "ship_number":"3", "player_name":"tony, "level":"6", "xpos":"412", "ypos":"517", "angle":"250", "tp":"True", "sp":"False", "shots":[(x,y), (x2, y2), ...] }
-                for other_ship in self.other_ships:
-                    o_ship = getattr(self, "ship_%s" % other_ship["ship_number"])
-                    
-                    # only ship 1 can change the level, so for this case we are not ship 1
-                    # but ship 1 changed the level, so we follow and change the level (possible only with force=1)
-                    if (other_ship["ship_number"] == "1") and (other_ship["level"] != self.level):
-                        self.set_level_and_ships(other_ship["level"], force=True)
-                        self.ship_x.sound_thrust.stop()
-                        self.ship_x.sound_shoot.stop()
-                        self.ship_x.sound_shield.stop()
-                        self.ship_x.sound_bounce.stop()
-
-                    o_ship.player_name = other_ship["player_name"]
-
-                    o_ship.xpos   = other_ship["xpos"]
-                    o_ship.ypos   = other_ship["ypos"]
-                    o_ship.angle  = other_ship["angle"]
-                    o_ship.landed = other_ship["landed"]
-                    o_ship.explod = other_ship["explod"]
-                    o_ship.thrust_pressed = other_ship["tp"]
-                    o_ship.shield_pressed = other_ship["sp"]
-                    o_ship.game_over = other_ship["game_over"]
-
-                    if other_ship["tp"]:
-                        o_ship.thrust = True
-                    else:
-                        o_ship.thrust = False
-
-                    if other_ship["sp"]:
-                        o_ship.shield = True
-                    else:
-                        o_ship.shield = False
-
-                    o_ship.image = o_ship.ship_pic
-                    if o_ship.shield_pressed:
-                        o_ship.image = o_ship.ship_pic_shield
-                    if o_ship.thrust_pressed:
-                        o_ship.image = o_ship.ship_pic_thrust
-
-                    o_ship.image_rotated = pygame.transform.rotate(o_ship.image, o_ship.angle)
-                    o_ship.mask = pygame.mask.from_surface(o_ship.image_rotated)
-
-                    rect = o_ship.image_rotated.get_rect()
-                    o_ship.rot_xoffset = int( ((SHIP_SPRITE_SIZE - rect.width)/2) )  # used in draw() and collide_map()
-                    o_ship.rot_yoffset = int( ((SHIP_SPRITE_SIZE - rect.height)/2) ) # used in draw() and collide_map()
-
-                    o_shots = []
-                    for o_shot in other_ship["shots"]:
-                        shot = Shot()
-                        shot.x = o_shot[0]
-                        shot.xposprecise = o_shot[0]
-                        shot.y = o_shot[1]
-                        shot.yposprecise = o_shot[1]
-
-                        o_shots.append(shot)
-
-                    o_ship.shots = o_shots
-
-                    self.active_ships.append(o_ship)
-
-                # collide_map
-                #for ship in self.active_ships:
-                #    ship.collide_map(self.map_buffer, self.map_buffer_mask, self.platforms)
-                self.ship_x.collide_map(self.map_buffer, self.map_buffer_mask, self.platforms)
-
-                for ship in self.active_ships:
-                    ship.collide_ship(self.active_ships)
-                    
-                for ship in self.active_ships:
-                    ship.plot_shots(self.map_buffer, ship.shots)
-
-                for ship in self.active_ships:
-                    ship.explod_sequence(self)
-
-                for ship in self.active_ships:
-                    ship.collide_shots(self.active_ships)
-
-                # blit ship in the map
-                for ship in self.active_ships:
-                    if ship == self.ship_x:
-                        ship.draw(self.map_buffer)
-                    else:
-                        ship.draw(self.map_buffer, render_name=True)
-                # blit the map area around the ship on the screen
-                for ship in self.active_ships:
-
-                    if not self.show_all_players:
-                        if ship != self.ship_x:
-                            continue
-
-                    # clipping to avoid black when the ship is close to the edges
-                    rx = ship.xpos - ship.view_width/2
-                    ry = ship.ypos - ship.view_height/2
-                    if rx < 0:
-                        rx = 0
-                    elif rx > (self.MAP_WIDTH - ship.view_width):
-                        rx = (self.MAP_WIDTH - ship.view_width)
-                    if ry < 0:
-                        ry = 0
-                    elif ry > (self.MAP_HEIGHT - ship.view_height):
-                        ry = (self.MAP_HEIGHT - ship.view_height)
-
-                    sub_area1 = Rect(rx, ry, ship.view_width, ship.view_height)
-
-                    self.game.screen.blit(self.map_buffer, (ship.view_left, ship.view_top), sub_area1)
-
-                # debug on screen
-                self.screen_print_info()
-
-                # split lines
-                if self.show_all_players:
-                    cv = (225, 225, 225)
-                    pygame.draw.line( self.game.screen, cv, (0, int(self.game.screen_height/2)), (self.game.screen_width, int(self.game.screen_height/2)) )
-                    pygame.draw.line( self.game.screen, cv, (int(self.game.screen_width/2), 0), (int(self.game.screen_width/2), (self.game.screen_height)) )
-
-                if self.game.use_opengl:
-                    self.game.set_uniform(self.game.screen_program, "time", self.frames)
-
-                    try:
-                        self.game.frame_tex.write(self.game.display.get_view('1'))
-                        #self.frame_tex.write(self.display.get_buffer())
-                    except:
-                        pass
-
-                    self.game.vao.render(mode=mgl.TRIANGLE_STRIP)
-
-                    if self.game.show_options:
-                        self.show_options_ui()
-                        imgui.render()
-                        self.game.imgui_renderer.render(imgui.get_draw_data())
-
-                # display
-                pygame.display.flip()
-                self.frames += 1
-
-            # local play
-            else:
-
-                # events
-                for event in pygame.event.get():
-                    if event.type == pygame.QUIT:
-                        self.record_it()
-                        if self.game.use_opengl:
-                            self.game.frame_tex.release()
-                        reactor.stop()
-                        #sys.exit(0)
-
-                    elif event.type == pygame.KEYDOWN:
-                        if event.key == pygame.K_ESCAPE:
-                            self.record_it()
-                            if self.game.use_opengl:
-                                self.game.frame_tex.release()
-                            reactor.stop()
-                            #sys.exit(0)
-                        elif event.key == pygame.K_p:
-                            self.paused = not self.paused
-
-                        elif event.key == pygame.K_1:
-                            self.set_level_and_ships(1)
-                        elif event.key == pygame.K_2:
-                            self.set_level_and_ships(2)
-                        elif event.key == pygame.K_3:
-                            self.set_level_and_ships(3)
-                        elif event.key == pygame.K_4:
-                            self.set_level_and_ships(4)
-                        elif event.key == pygame.K_5:
-                            self.set_level_and_ships(5)
-                        elif event.key == pygame.K_6:
-                            self.set_level_and_ships(6)
-                        elif event.key == pygame.K_7:
-                            self.set_level_and_ships(7)
-
-                        self.ship_key_down(event.key, self.ship_1, SHIP_1_KEYS)
-                        self.ship_key_down(event.key, self.ship_2, SHIP_2_KEYS)
-                        self.ship_key_down(event.key, self.ship_3, SHIP_3_KEYS)
-                        self.ship_key_down(event.key, self.ship_4, SHIP_4_KEYS)
-
-                    elif event.type == pygame.KEYUP:
-                        self.ship_key_up(event.key, self.ship_1, SHIP_1_KEYS)
-                        self.ship_key_up(event.key, self.ship_2, SHIP_2_KEYS)
-                        self.ship_key_up(event.key, self.ship_3, SHIP_3_KEYS)
-                        self.ship_key_up(event.key, self.ship_4, SHIP_4_KEYS)
-
-                    # imgui event
-                    if self.game.use_opengl and self.game.show_options:
-                        self.game.imgui_renderer.process_event(event)
-
-                # joystick
-                for ship in self.ships:
-                    if ship.joystick_number:
-
-                        if ship.joystick_number == 1:
-                            joy = self.joy1
-                        elif ship.joystick_number == 2:
-                            joy = self.joy2
-
-                        try:
-                            if joy.get_button(0):
-                                ship.thrust_pressed = True
-                            else:
-                                ship.thrust_pressed = False
-
-                            if joy.get_button(5):
-                                ship.shoot_pressed = True
-                            else:
-                                ship.shoot_pressed = False
-
-                            if joy.get_button(1):
-                                ship.shield_pressed = True
-                            else:
-                                ship.shield_pressed = False
-
-                            horizontal_axis = joy.get_axis(0)
-
-                            if int(round(horizontal_axis)) == 1:
-                                ship.right_pressed = True
-                            else:
-                                ship.right_pressed = False
-
-                            if int(round(horizontal_axis)) == -1:
-                                ship.left_pressed = True
-                            else:
-                                ship.left_pressed = False
-                        except:
-                            pass
-
-                # core
-                if not self.paused:
-                    # per level data
-                    self.map = self.game.getv("map", current_level=self.level)
-                    self.map_buffer = self.game.getv("map_buffer", current_level=self.level)
-                    self.map_buffer_mask = self.game.getv("map_buffer_mask", current_level=self.level)
-                    self.platforms = self.game.getv("platforms", current_level=self.level)
-
-                    # clear screen
-                    self.game.screen.fill((0,0,0))
-
-                    self.map_buffer.blit(self.map, (0, 0))
-
-                    # update ship pos
-                    for ship in self.ships:
-                        ship.update(self, ship.left_pressed, ship.right_pressed, ship.thrust_pressed, ship.shoot_pressed, ship.shield_pressed)
-
-                    # collide_map
-                    for ship in self.ships:
-                        ship.collide_map(self.map_buffer, self.map_buffer_mask, self.platforms)
-
-                    for ship in self.ships:
-                        ship.collide_ship(self.ships)
-                        
-                    for ship in self.ships:
-                        ship.plot_shots(self.map_buffer, ship.shots)
-
-                    for ship in self.ships:
-                        ship.explod_sequence(self)
-
-                    for ship in self.ships:
-                        ship.collide_shots(self.ships)
-
-                    # blit ship in the map
-                    for ship in self.ships:
-                        ship.draw(self.map_buffer)
-
-                    for ship in self.ships:
-
-                        # clipping to avoid black when the ship is close to the edges
-                        rx = ship.xpos - ship.view_width/2
-                        ry = ship.ypos - ship.view_height/2
-                        if rx < 0:
-                            rx = 0
-                        elif rx > (self.MAP_WIDTH - ship.view_width):
-                            rx = (self.MAP_WIDTH - ship.view_width)
-                        if ry < 0:
-                            ry = 0
-                        elif ry > (self.MAP_HEIGHT - ship.view_height):
-                            ry = (self.MAP_HEIGHT - ship.view_height)
-
-                        # blit the map area around the ship on the screen
-                        sub_area1 = Rect(rx, ry, ship.view_width, ship.view_height)
-                        self.game.screen.blit(self.map_buffer, (ship.view_left, ship.view_top), sub_area1)
-
-                    # debug on screen
-                    self.screen_print_info()
-
-                    cv = (225, 225, 225)
-                    pygame.draw.line( self.game.screen, cv, (0, int(self.game.screen_height/2)), (self.game.screen_width, int(self.game.screen_height/2)) )
-                    pygame.draw.line( self.game.screen, cv, (int(self.game.screen_width/2), 0), (int(self.game.screen_width/2), (self.game.screen_height)) )
-
+            # 1. -------
+            # Set our player status in self.game_client_factory: will be send each time we received a message action = Action.PLAYER_UPDATE_REQUEST
+
+            # self.game_client_factory.ship_number is set by the server when we logged
+            self.ship_x = getattr(self, "ship_%s" % str(self.game_client_factory.ship_number))
+            self.ship_x.player_name = self.player_name
+
+            # player_name set in init()
+            # { "ship_number":"3", "player_name":"tony, "level":"6", "xpos":"412", "ypos":"517", "angle":"250", "tp":"True", "sp":"False", "shots":[(x,y), (x2, y2), ...] }
+            self.game_client_factory.level     = self.level # only ship_1 can set the level number
+            self.game_client_factory.xpos      = self.ship_x.xposprecise
+            self.game_client_factory.ypos      = self.ship_x.yposprecise
+            self.game_client_factory.angle     = self.ship_x.angle
+            self.game_client_factory.tp        = self.ship_x.thrust_pressed
+            self.game_client_factory.sp        = self.ship_x.shield_pressed
+            self.game_client_factory.landed    = self.ship_x.landed
+            self.game_client_factory.explod    = self.ship_x.explod
+            self.game_client_factory.game_over = self.ship_x.game_over
+            self.game_client_factory.lives     = self.ship_x.lives
+
+            particles = []
+            for s in self.ship_x.shots:
+                particles.append((s.x, s.y))
+            #for d in self.ship_x.debris:
+            #    particles.append((d.x, d.y))
+
+            self.game_client_factory.shots = particles
+
+            # 2. -------
+            # Get other players status if any
+
+            self.other_ships = []
+
+            others = ["1", "2", "3", "4"]
+            others.remove(self.game_client_factory.ship_number) # remove ourself from the list
+
+            for ship_number in others:
+                try:
+                    ship_update = getattr(self.game_client_factory, "other_player_%s" % str(ship_number))
+                except:
+                    ship_update = None
+
+                if ship_update:
+                    self.other_ships.append(ship_update)
+
+            #print("other_ships=", self.other_ships)
+
+            # 1. self.ship_x is the ship we play with, this will update its posx etc. and we change the states of self.game_client_factory based on that
+            #    then our player xpos etc. will be transmitted throught self.game_client_factory each time we receive a message Action.PLAYER_UPDATE_REQUEST
+            #
+            # 2. self.other_ships contains the other ships last updates we got from the server (message Action.OTHER_PLAYER_UPDATE)
+            #    then we need to render those ships and process collision etc accordingly
+
+            ship_keys = SHIP_2_KEYS
+            if self.ship_control == "k2":
+                ship_keys = SHIP_1_KEYS
+
+            # events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    self.record_it()
                     if self.game.use_opengl:
-                        self.game.set_uniform(self.game.screen_program, "time", self.frames)
+                        self.game.frame_tex.release()
+                    reactor.stop()
+                    #sys.exit(0)
 
-                        try:
-                            self.game.frame_tex.write(self.game.display.get_view('1'))
-                            #self.frame_tex.write(self.display.get_buffer())
-                        except:
-                            pass
+                elif event.type == pygame.KEYDOWN:
+                    if event.key == pygame.K_ESCAPE:
+                        self.record_it()
+                        if self.game.use_opengl:
+                            self.game.frame_tex.release()
+                        reactor.stop()
+                        #sys.exit(0)
+                    elif event.key == pygame.K_p:
+                        self.paused = not self.paused
 
-                        self.game.vao.render(mode=mgl.TRIANGLE_STRIP)
+                    elif event.key == pygame.K_1:
+                        self.set_level_and_ships(1)
+                    elif event.key == pygame.K_2:
+                        self.set_level_and_ships(2)
+                    elif event.key == pygame.K_3:
+                        self.set_level_and_ships(3)
+                    elif event.key == pygame.K_4:
+                        self.set_level_and_ships(4)
+                    elif event.key == pygame.K_5:
+                        self.set_level_and_ships(5)
+                    elif event.key == pygame.K_6:
+                        self.set_level_and_ships(6)
+                    elif event.key == pygame.K_7:
+                        self.set_level_and_ships(7)
 
-                        if self.game.show_options:
-                            self.show_options_ui()
-                            imgui.render()
-                            self.game.imgui_renderer.render(imgui.get_draw_data())
+                    self.ship_key_down(event.key, self.ship_x, ship_keys)
 
-                    # display
-                    pygame.display.flip()
-                    self.frames += 1
+                elif event.type == pygame.KEYUP:
+                    self.ship_key_up(event.key, self.ship_x, ship_keys)
 
+                # imgui event
+                if self.game.use_opengl and self.game.show_options:
+                    self.game.imgui_renderer.process_event(event)
 
-            # we are using twisted loop so remove next line
-            #self.clock.tick(self.max_fps)
+            # joystick
+            if self.joystick:
+                try:
+                    if self.joystick.get_button(0):
+                        self.ship_x.thrust_pressed = True
+                    else:
+                        self.ship_x.thrust_pressed = False
+
+                    if self.joystick.get_button(5):
+                        self.ship_x.shoot_pressed = True
+                    else:
+                        self.ship_x.shoot_pressed = False
+
+                    if self.joystick.get_button(1):
+                        self.ship_x.shield_pressed = True
+                    else:
+                        self.ship_x.shield_pressed = False
+
+                    horizontal_axis = self.joystick.get_axis(0)
+
+                    if int(round(horizontal_axis)) == 1:
+                        self.ship_x.right_pressed = True
+                    else:
+                        self.ship_x.right_pressed = False
+
+                    if int(round(horizontal_axis)) == -1:
+                        self.ship_x.left_pressed = True
+                    else:
+                        self.ship_x.left_pressed = False
+                except:
+                    pass
+
+            # per level data
+            self.map = self.game.getv("map", current_level=self.level)
+            self.map_buffer = self.game.getv("map_buffer", current_level=self.level)
+            self.map_buffer_mask = self.game.getv("map_buffer_mask", current_level=self.level)
+            self.platforms = self.game.getv("platforms", current_level=self.level)
+
+            # clear screen
+            self.game.screen.fill((0,0,0))
+
+            self.map_buffer.blit(self.map, (0, 0))
+
+            # update ship pos
+            self.ship_x.update(self, self.ship_x.left_pressed, self.ship_x.right_pressed, self.ship_x.thrust_pressed, 
+                                     self.ship_x.shoot_pressed, self.ship_x.shield_pressed)
+
+            self.active_ships = []
+            self.active_ships.append(self.ship_x)
+
+            # { "ship_number":"3", "player_name":"tony, "level":"6", "xpos":"412", "ypos":"517", "angle":"250", "tp":"True", "sp":"False", "shots":[(x,y), (x2, y2), ...] }
+            for other_ship in self.other_ships:
+                o_ship = getattr(self, "ship_%s" % str(other_ship["ship_number"]))
                 
+                # only ship 1 can change the level, so for this case we are not ship 1
+                # but ship 1 changed the level, so we follow and change the level (possible only with force=1)
+                if (other_ship["ship_number"] == "1") and (other_ship["level"] != self.level):
+                    self.set_level_and_ships(other_ship["level"], force=True)
+                    self.ship_x.sound_thrust.stop()
+                    self.ship_x.sound_shoot.stop()
+                    self.ship_x.sound_shield.stop()
+                    self.ship_x.sound_bounce.stop()
+                    self.ship_x.sound_explod.stop()
+
+                o_ship.player_name = other_ship["player_name"]
+
+                o_ship.xpos   = other_ship["xpos"]
+                o_ship.ypos   = other_ship["ypos"]
+                o_ship.angle  = other_ship["angle"]
+                o_ship.landed = other_ship["landed"]
+                o_ship.explod = other_ship["explod"]
+                o_ship.thrust_pressed = other_ship["tp"]
+                o_ship.shield_pressed = other_ship["sp"]
+                o_ship.game_over = other_ship["game_over"]
+                o_ship.lives = other_ship["lives"]
+
+                if other_ship["tp"]:
+                    o_ship.thrust = True
+                else:
+                    o_ship.thrust = False
+
+                if other_ship["sp"]:
+                    o_ship.shield = True
+                else:
+                    o_ship.shield = False
+
+                o_ship.image = o_ship.ship_pic
+                if o_ship.shield_pressed:
+                    o_ship.image = o_ship.ship_pic_shield
+                if o_ship.thrust_pressed:
+                    o_ship.image = o_ship.ship_pic_thrust
+
+                o_ship.image_rotated = pygame.transform.rotate(o_ship.image, o_ship.angle)
+                o_ship.mask = pygame.mask.from_surface(o_ship.image_rotated)
+
+                rect = o_ship.image_rotated.get_rect()
+                o_ship.rot_xoffset = int( ((SHIP_SPRITE_SIZE - rect.width)/2) )  # used in draw() and collide_map()
+                o_ship.rot_yoffset = int( ((SHIP_SPRITE_SIZE - rect.height)/2) ) # used in draw() and collide_map()
+
+                o_shots = []
+                for o_shot in other_ship["shots"]:
+                    shot = Shot()
+                    shot.x = o_shot[0]
+                    shot.xposprecise = o_shot[0]
+                    shot.y = o_shot[1]
+                    shot.yposprecise = o_shot[1]
+
+                    o_shots.append(shot)
+
+                o_ship.shots = o_shots
+
+                self.active_ships.append(o_ship)
+
+            # collide_map
+            #for ship in self.active_ships:
+            #    ship.collide_map(self.map_buffer, self.map_buffer_mask, self.platforms)
+            self.ship_x.collide_map(self.map_buffer, self.map_buffer_mask, self.platforms)
+
+            for ship in self.active_ships:
+                ship.collide_ship(self.active_ships)
+                
+            for ship in self.active_ships:
+                ship.plot_shots(self.map_buffer, ship.shots)
+
+            for ship in self.active_ships:
+                ship.explod_sequence(self)
+
+            for ship in self.active_ships:
+                ship.collide_shots(self.active_ships)
+
+            # blit ship in the map
+            for ship in self.active_ships:
+                if ship == self.ship_x:
+                    ship.draw(self.map_buffer)
+                else:
+                    ship.draw(self.map_buffer, render_name=True)
+            # blit the map area around the ship on the screen
+            for ship in self.active_ships:
+
+                if not self.show_all_players:
+                    if ship != self.ship_x:
+                        continue
+
+                # clipping to avoid black when the ship is close to the edges
+                rx = ship.xpos - ship.view_width/2
+                ry = ship.ypos - ship.view_height/2
+                if rx < 0:
+                    rx = 0
+                elif rx > (self.MAP_WIDTH - ship.view_width):
+                    rx = (self.MAP_WIDTH - ship.view_width)
+                if ry < 0:
+                    ry = 0
+                elif ry > (self.MAP_HEIGHT - ship.view_height):
+                    ry = (self.MAP_HEIGHT - ship.view_height)
+
+                sub_area1 = Rect(rx, ry, ship.view_width, ship.view_height)
+
+                self.game.screen.blit(self.map_buffer, (ship.view_left, ship.view_top), sub_area1)
+
+            # debug on screen
+            self.screen_print_info()
+
+            # split lines
+            if self.show_all_players:
+                cv = (225, 225, 225)
+                pygame.draw.line( self.game.screen, cv, (0, int(self.game.screen_height/2)), (self.game.screen_width, int(self.game.screen_height/2)) )
+                pygame.draw.line( self.game.screen, cv, (int(self.game.screen_width/2), 0), (int(self.game.screen_width/2), (self.game.screen_height)) )
+
+            if self.game.use_opengl:
+                self.game.set_uniform(self.game.screen_program, "time", self.frames)
+
+                try:
+                    self.game.frame_tex.write(self.game.display.get_view('1'))
+                    #self.frame_tex.write(self.display.get_buffer())
+                except:
+                    pass
+
+                self.game.vao.render(mode=mgl.TRIANGLE_STRIP)
+
+                if self.game.show_options:
+                    self.show_options_ui()
+                    imgui.render()
+                    self.game.imgui_renderer.render(imgui.get_draw_data())
+
+            # display
+            pygame.display.flip()
+            self.frames += 1
+
             self.get_fps()
-            #print(self.clock.get_fps())
+
+    def game_loop_local(self):
+
+        # events
+        for event in pygame.event.get():
+            if event.type == pygame.QUIT:
+                self.record_it()
+                if self.game.use_opengl:
+                    self.game.frame_tex.release()
+                reactor.stop()
+                #sys.exit(0)
+
+            elif event.type == pygame.KEYDOWN:
+                if event.key == pygame.K_ESCAPE:
+                    self.record_it()
+                    if self.game.use_opengl:
+                        self.game.frame_tex.release()
+                    reactor.stop()
+                    #sys.exit(0)
+                elif event.key == pygame.K_p:
+                    self.paused = not self.paused
+
+                elif event.key == pygame.K_1:
+                    self.set_level_and_ships(1)
+                elif event.key == pygame.K_2:
+                    self.set_level_and_ships(2)
+                elif event.key == pygame.K_3:
+                    self.set_level_and_ships(3)
+                elif event.key == pygame.K_4:
+                    self.set_level_and_ships(4)
+                elif event.key == pygame.K_5:
+                    self.set_level_and_ships(5)
+                elif event.key == pygame.K_6:
+                    self.set_level_and_ships(6)
+                elif event.key == pygame.K_7:
+                    self.set_level_and_ships(7)
+
+                self.ship_key_down(event.key, self.ship_1, SHIP_1_KEYS)
+                self.ship_key_down(event.key, self.ship_2, SHIP_2_KEYS)
+                self.ship_key_down(event.key, self.ship_3, SHIP_3_KEYS)
+                self.ship_key_down(event.key, self.ship_4, SHIP_4_KEYS)
+
+            elif event.type == pygame.KEYUP:
+                self.ship_key_up(event.key, self.ship_1, SHIP_1_KEYS)
+                self.ship_key_up(event.key, self.ship_2, SHIP_2_KEYS)
+                self.ship_key_up(event.key, self.ship_3, SHIP_3_KEYS)
+                self.ship_key_up(event.key, self.ship_4, SHIP_4_KEYS)
+
+            # imgui event
+            if self.game.use_opengl and self.game.show_options:
+                self.game.imgui_renderer.process_event(event)
+
+        # joystick
+        for ship in self.ships:
+            if ship.joystick_number:
+
+                if ship.joystick_number == 1:
+                    joy = self.joy1
+                elif ship.joystick_number == 2:
+                    joy = self.joy2
+
+                try:
+                    if joy.get_button(0):
+                        ship.thrust_pressed = True
+                    else:
+                        ship.thrust_pressed = False
+
+                    if joy.get_button(5):
+                        ship.shoot_pressed = True
+                    else:
+                        ship.shoot_pressed = False
+
+                    if joy.get_button(1):
+                        ship.shield_pressed = True
+                    else:
+                        ship.shield_pressed = False
+
+                    horizontal_axis = joy.get_axis(0)
+
+                    if int(round(horizontal_axis)) == 1:
+                        ship.right_pressed = True
+                    else:
+                        ship.right_pressed = False
+
+                    if int(round(horizontal_axis)) == -1:
+                        ship.left_pressed = True
+                    else:
+                        ship.left_pressed = False
+                except:
+                    pass
+
+        # core
+        if not self.paused:
+            # per level data
+            self.map = self.game.getv("map", current_level=self.level)
+            self.map_buffer = self.game.getv("map_buffer", current_level=self.level)
+            self.map_buffer_mask = self.game.getv("map_buffer_mask", current_level=self.level)
+            self.platforms = self.game.getv("platforms", current_level=self.level)
+
+            # clear screen
+            self.game.screen.fill((0,0,0))
+
+            self.map_buffer.blit(self.map, (0, 0))
+
+            # update ship pos
+            for ship in self.ships:
+                ship.update(self, ship.left_pressed, ship.right_pressed, ship.thrust_pressed, ship.shoot_pressed, ship.shield_pressed)
+
+            # collide_map
+            for ship in self.ships:
+                ship.collide_map(self.map_buffer, self.map_buffer_mask, self.platforms)
+
+            for ship in self.ships:
+                ship.collide_ship(self.ships)
+                
+            for ship in self.ships:
+                ship.plot_shots(self.map_buffer, ship.shots)
+
+            for ship in self.ships:
+                ship.explod_sequence(self)
+
+            for ship in self.ships:
+                ship.collide_shots(self.ships)
+
+            # blit ship in the map
+            for ship in self.ships:
+                ship.draw(self.map_buffer)
+
+            for ship in self.ships:
+
+                # clipping to avoid black when the ship is close to the edges
+                rx = ship.xpos - ship.view_width/2
+                ry = ship.ypos - ship.view_height/2
+                if rx < 0:
+                    rx = 0
+                elif rx > (self.MAP_WIDTH - ship.view_width):
+                    rx = (self.MAP_WIDTH - ship.view_width)
+                if ry < 0:
+                    ry = 0
+                elif ry > (self.MAP_HEIGHT - ship.view_height):
+                    ry = (self.MAP_HEIGHT - ship.view_height)
+
+                # blit the map area around the ship on the screen
+                sub_area1 = Rect(rx, ry, ship.view_width, ship.view_height)
+                self.game.screen.blit(self.map_buffer, (ship.view_left, ship.view_top), sub_area1)
+
+            # debug on screen
+            self.screen_print_info()
+
+            cv = (225, 225, 225)
+            pygame.draw.line( self.game.screen, cv, (0, int(self.game.screen_height/2)), (self.game.screen_width, int(self.game.screen_height/2)) )
+            pygame.draw.line( self.game.screen, cv, (int(self.game.screen_width/2), 0), (int(self.game.screen_width/2), (self.game.screen_height)) )
+
+            if self.game.use_opengl:
+                self.game.set_uniform(self.game.screen_program, "time", self.frames)
+
+                try:
+                    self.game.frame_tex.write(self.game.display.get_view('1'))
+                    #self.frame_tex.write(self.display.get_buffer())
+                except:
+                    pass
+
+                self.game.vao.render(mode=mgl.TRIANGLE_STRIP)
+
+                if self.game.show_options:
+                    self.show_options_ui()
+                    imgui.render()
+                    self.game.imgui_renderer.render(imgui.get_draw_data())
+
+            # display
+            pygame.display.flip()
+            self.frames += 1
+
+            self.get_fps()
 
     def screen_print_info(self):
 
@@ -1492,21 +1504,26 @@ class MayhemEnv():
         if self.game_client_factory:
             if self.show_all_players:
                 for ship in self.active_ships:
-                    pn = self.myfont.render('%s' % (ship.player_name, ), False, (255, 255, 0))
+                    pn = self.myfont.render('%s' % (ship.player_name, ), False, (200, 200, 0))
                     self.game.screen.blit(pn, (ship.view_left, ship.view_top))
 
             for ship in self.active_ships:
                 offset = 0
                 if self.show_all_players:
                     offset = 20
-                lives = self.myfont.render('%s' % (ship.lives, ), False, (255, 255, 0))
+                lives = self.myfont.render('%s' % (ship.lives, ), False, (200, 200, 0))
                 self.game.screen.blit(lives, (ship.view_left, ship.view_top + offset))
 
             # game over
-            for ship in self.active_ships:
-                if ship.game_over:
+            if self.show_all_players:
+                for ship in self.active_ships:
+                    if ship.game_over:
+                        go = self.myfont_big.render('GAME OVER', False, (255, 0, 0))
+                        self.game.screen.blit(go, (ship.view_left, ship.view_top + offset + 20))
+            else:
+                if self.ship_x.game_over:
                     go = self.myfont_big.render('GAME OVER', False, (255, 0, 0))
-                    self.game.screen.blit(go, (ship.view_left, ship.view_top + offset + 20))
+                    self.game.screen.blit(go, (self.ship_x.view_left, self.ship_x.view_top + offset + 20))
 
         # debug text
         if self.debug_print:
@@ -1527,7 +1544,6 @@ class MayhemEnv():
 
             #ship_lives = self.myfont.render('Lives: %s' % (self.ship_1.lives,), False, (255, 255, 255))
             #self.game.screen.blit(ship_lives, (DEBUG_TEXT_XPOS + 5, 105))
-
 
 # -------------------------------------------------------------------------------------------------
 
@@ -1736,7 +1752,6 @@ class GameWindow():
         except KeyError:
             pass
 
-
 # -------------------------------------------------------------------------------------------------
 
 class Action(str, enum.Enum):
@@ -1752,32 +1767,35 @@ class Action(str, enum.Enum):
 
     OTHER_PLAYER_UPDATE = enum.auto()
 
+    SERVER_STAT_REGISTER = enum.auto()
+    SERVER_STAT_OK = enum.auto()
+    SERVER_STAT_UPDATE = enum.auto()
+
+    OTHER_PLAYER_DISCONNECT = enum.auto()
+
 # -------------------------------------------------------------------------------------------------
 
 class GameClientProtocol(WebSocketClientProtocol):
 
+    # connect to the game server
+    # then the server send a player update request
+    # => the player sent back its position etc
+    # when the server gets it, it brodcast that to all other players in the room
+     
     def onOpen(self):
         print("Connected to the GameServer, username=%s" % self.factory.player_name)
         print("Requesting room_id=%s" % self.factory.room_id)
 
         msg = {"a":Action.LOGIN, "p":{"room_id":self.factory.room_id}}
-
-        if USE_JSON:
-            self.sendMessage(json.dumps(msg).encode('utf8'))
-        else:
-            self.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)
+        self.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)
 
     def onMessage(self, payload, isBinary):
 
-        if isBinary:
-            r = msgpack.unpackb(payload, raw=False)
-        else:
-            #print("Message received: %s" % payload.decode('utf8'))
-            r = json.loads(payload.decode('utf8'))
+        r = msgpack.unpackb(payload, raw=False)
 
         if r["a"] == Action.LOGIN_OK:
-            room_id = str(r["p"]["ship_nb"])
             print("Entered in the game in room %s as ship n°%s" % (str(r["p"]["room_id"]), str(r["p"]["ship_nb"])))
+            self.factory.room_id = str(r["p"]["room_id"])
             self.factory.ship_number = str(r["p"]["ship_nb"]) # we are ship #x in the game
             self.factory._state = Action.PLAY
 
@@ -1791,14 +1809,10 @@ class GameClientProtocol(WebSocketClientProtocol):
             # { "ship_number":"3", "player_name":"tony, "level":"6", "xpos":"412", "ypos":"517", "angle":"250", "tp":"True", "sp":"False", "shots":[(x,y), (x2, y2), ...] }
             ship_update = { "ship_number":self.factory.ship_number, "player_name":self.factory.player_name, "level":self.factory.level,
                             "xpos":self.factory.xpos, "ypos":self.factory.ypos, "angle":self.factory.angle, "landed":self.factory.landed, "explod":self.factory.explod,
-                            "tp":self.factory.tp, "sp":self.factory.sp, "shots":self.factory.shots, "game_over":self.factory.game_over}
+                            "tp":self.factory.tp, "sp":self.factory.sp, "shots":self.factory.shots, "game_over":self.factory.game_over, "lives":self.factory.lives }
             
-            msg = {"a" : Action.PLAYER_UPDATE, "p":ship_update}
-            
-            if USE_JSON:
-                self.sendMessage(json.dumps(msg).encode('utf8'))
-            else:
-                self.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)
+            msg = {"a":Action.PLAYER_UPDATE, "p":ship_update}
+            self.sendMessage(msgpack.packb(msg, use_bin_type=True), isBinary=True)
 
             if self.factory.game_over:
                 #print("Game Over, disconnecting...")
@@ -1808,7 +1822,24 @@ class GameClientProtocol(WebSocketClientProtocol):
             #print("Received another player update: ", r["p"])
 
             ship_update = r["p"]
-            setattr(self.factory, "other_player_%s" % ship_update["ship_number"], ship_update)
+            setattr(self.factory, "other_player_%s" % str(ship_update["ship_number"]), ship_update)
+
+        elif r["a"] == Action.OTHER_PLAYER_DISCONNECT:
+            print("Received another player disconnect: ", r["p"])
+
+            ship_number = r["p"]
+
+            try:
+                if ship_number in ("1", 1):
+                    del self.factory.other_player_1
+                elif ship_number in ("2", 2):
+                    del self.factory.other_player_2
+                elif ship_number in ("3", 3):
+                    del self.factory.other_player_3
+                elif ship_number in ("4", 4):
+                    del self.factory.other_player_4
+            except Exception as e:
+                print("Failed to remove other player %s : %s" % (str(ship_number), repr(e)))
 
     def onClose(self, wasClean, code, reason):
         print("Exited from the GameServer")
@@ -1818,6 +1849,7 @@ class GameClientProtocol(WebSocketClientProtocol):
 
 #class GameClientFactory(WebSocketClientFactory, ReconnectingClientFactory):
 class GameClientFactory(WebSocketClientFactory):
+    """ Player update paquet vars """
 
     def __init__(self, url, player_name, room_id):
         WebSocketClientFactory.__init__(self, url)
@@ -1825,6 +1857,7 @@ class GameClientFactory(WebSocketClientFactory):
 
         self._state = Action.LOGIN
 
+        self.server_url = url
         self.player_name = player_name
         self.room_id = room_id
         
@@ -1840,6 +1873,7 @@ class GameClientFactory(WebSocketClientFactory):
         self.shots = []
         self.explod = False
         self.game_over = False
+        self.lives = SHIP_MAX_LIVES
 
     #def clientConnectionFailed(self, connector, reason):
     #    print("Client connection failed .. retrying ..")
@@ -2036,11 +2070,6 @@ def run():
 
     print("Args=", args)
 
-    if USE_JSON:
-        print("WARN: Using json, if the server is using msgpack you would need to install it")
-    else:
-        print("Using msgpack")
-
     # player vars from command line
     player_name = args["player_name"]
     room_id = args["room_id"]
@@ -2052,8 +2081,6 @@ def run():
     opengl = args["opengl"]
     zoom = args["zoom"]
     show_options = args["show_options"]
-
-    # GameMenu (player vars from menu)
 
     # load previous user settings
     user_settings_file = os.path.join(os.path.dirname(__file__), "user_settings.dat")
@@ -2095,8 +2122,12 @@ def run():
         height = 448
 
     # online ?
+    online = False
     if server and server!="None":
-        print("Going to connect to %s" % server)
+        online = True
+
+    if online:
+        print("Trying to connect to %s" % server)
         game_client_factory = GameClientFactory(server, player_name, room_id)
         game_client_factory.protocol = GameClientProtocol
         connectWS(game_client_factory)
@@ -2110,13 +2141,13 @@ def run():
     game_env = MayhemEnv(game_window, level=level, max_fps=fps, debug_print=args["debug_print"], motion=args["motion"],
                     record_play=args["record_play"], play_recorded=args["play_recorded"], player_name=player_name, 
                     show_all_players=show_all_players, ship_control=ship_control, game_client_factory=game_client_factory)
+    
+    if online:
+        game_loop = game_env.game_loop_online
+    else:
+        game_loop = game_env.game_loop_local
 
-    # pygame loop
-    #while True:
-    #    game_env.game_loop()
-
-    # twisted loop
-    tick = task.LoopingCall(game_env.game_loop)
+    tick = task.LoopingCall(game_loop)
     tick.start(1.0 / int(args["fps"]))
 
     reactor.run()
