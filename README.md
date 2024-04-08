@@ -2,8 +2,6 @@
 
 Python version of the classic Amiga game Mayhem with support for online gaming, try it on ws://13.38.62.149:4444
 
-HTML version (local gaming only) on: https://devpack.github.io/mayhem-html5 or https://devpack.itch.io/mayhem
-
 ![Menu](https://github.com/devpack/mayhem-py/blob/main/assets/wiki/menu.png)
 
 ![Online_Game](https://github.com/devpack/mayhem-py/blob/main/assets/wiki/online_game.png)
@@ -58,6 +56,10 @@ Some options to play with:
 -show_options : GUI to change the game physics (OpenGL mode is mandatory for this option to work)
 -ship_control : two keyboard layout, "k1" and "k2" ; "j1" for usb joystick
 ```
+
+----
+
+HTML version (local gaming only) on: https://devpack.github.io/mayhem-html5 or https://devpack.itch.io/mayhem
 
 ----
 
