@@ -1,8 +1,8 @@
-pygame-ce
-pygame-menu-ce
-msgpack
-twisted
-autobahn
-moderngl
-numpy
-imgui[pygame]
+pygame-ce==2.4.1
+pygame-menu-ce==4.4.3
+msgpack==1.0.8
+twisted==24.3.0
+autobahn==23.6.2
+moderngl==5.10.0
+numpy==1.26.4
+imgui[pygame]==2.0.0
